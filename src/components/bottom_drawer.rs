@@ -97,7 +97,13 @@ pub fn BottomDrawer(
                     &offset,
                     custom.as_ref(),
                     move |line| {
-                        flash_logs.update(|logs| logs.push(line));
+                        flash_logs.update(|logs| {
+                            logs.push(line);
+                            if logs.len() > 140 {
+                                let drain = logs.len() - 140;
+                                logs.drain(0..drain);
+                            }
+                        });
                         if let Some(el) = log_div_ref.get_untracked() {
                             el.set_scroll_top(el.scroll_height());
                         }
@@ -107,7 +113,9 @@ pub fn BottomDrawer(
                 .await;
 
             if let Err(err) = res {
-                flash_error.set(Some(err.clone()));
+                flash_error.set(Some(format!(
+                    "{err} (If USB re-enumerated, hold BOOT + tap RESET and click \"Select Other Port\")"
+                )));
                 flash_logs.update(|logs| logs.push(format!("ERROR: {err}")));
             }
             flashing.set(false);

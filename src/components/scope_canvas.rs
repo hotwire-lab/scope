@@ -210,7 +210,7 @@ pub fn ScopeCanvas(
                 if is_new_frame {
                     history.update_value(|h| {
                         h.push_back(frame.clone());
-                        while h.len() > 64 {
+                        while h.len() > 24 {
                             h.pop_front();
                         }
                     });
@@ -579,6 +579,22 @@ fn draw_frame_channels(
     let draw_end = (end_idx + 1).min(n);
     let visible_count = (end_idx - start_idx).max(1);
     let dx_per_sample = plot_w / (visible_count as f64);
+    // Use smooth cubic Hermite splines only when zoomed in so points are visibly spaced apart
+    // (at 1x zoom, lineTo is pixel-identical and 20x faster, keeping the GUI silky responsive)
+    let use_spline = if show_sample_dots {
+        dx_per_sample >= 4.0 && visible_count <= 450 && draw_end > draw_start + 1
+    } else {
+        dx_per_sample >= 6.0 && visible_count <= 250 && draw_end > draw_start + 1
+    };
+
+    ctx.save();
+    ctx.set_global_alpha(alpha);
+    ctx.begin_path();
+    ctx.rect(pad_l, pad_t, plot_w, scope_h);
+    ctx.clip();
+    ctx.set_line_width(line_width);
+    ctx.set_line_join("round");
+    ctx.set_line_cap("round");
 
     for ch in 0..4usize {
         let samples = &frame.channels_mv[ch];
@@ -586,19 +602,9 @@ fn draw_frame_channels(
             continue;
         }
         let color = CHANNEL_COLORS[ch];
-
-        ctx.save();
-        ctx.set_global_alpha(alpha);
-        ctx.begin_path();
-        ctx.rect(pad_l, pad_t, plot_w, scope_h);
-        ctx.clip();
-
         ctx.set_stroke_style_str(color);
-        ctx.set_line_width(line_width);
-        ctx.set_line_join("round");
-        ctx.set_line_cap("round");
 
-        if dx_per_sample > 1.5 && draw_end > draw_start + 1 {
+        if use_spline {
             // Monotone cubic Hermite spline (Fritsch-Carlson) using reusable scratch buffers (0 allocs)
             sc.xs.clear();
             sc.ys.clear();
@@ -686,9 +692,9 @@ fn draw_frame_channels(
             }
             ctx.stroke();
         }
-
-        ctx.restore();
     }
+
+    ctx.restore();
 }
 
 fn draw_graticule(

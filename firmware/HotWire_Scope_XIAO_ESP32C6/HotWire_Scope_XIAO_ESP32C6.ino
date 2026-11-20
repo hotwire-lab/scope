@@ -296,7 +296,8 @@ static void scope_capture_task(void* arg) {
     uint32_t min_interval_ms = 1000U / max<uint8_t>(fps_c, 1);
     if (run_mode == 1 && (millis() - last_tx_ms) < min_interval_ms) {
       uint32_t dummy_ret = 0;
-      adc_continuous_read(g_adc_handle, g_dma_buf, DMA_READ_BYTES, &dummy_ret, 5);
+      adc_continuous_read(g_adc_handle, g_dma_buf, DMA_READ_BYTES, &dummy_ret, 2);
+      vTaskDelay(pdMS_TO_TICKS(2));
       continue;
     }
 
@@ -476,7 +477,8 @@ static void process_command(const uint8_t cmd[8]) {
       break;
     case CMD_BOOTLOADER:
       if (cmd[3] == 0xB0 && cmd[4] == 0x07 && cmd[5] == 0x10 && cmd[6] == 0xAD) {
-        stop_adc();
+        g_cfg.run_mode = 0;
+        vTaskDelay(pdMS_TO_TICKS(25));
         esp_restart();
       }
       break;
@@ -485,35 +487,46 @@ static void process_command(const uint8_t cmd[8]) {
   }
 }
 
+static void protocol_rx_task(void* arg) {
+  (void)arg;
+  uint8_t rx_buf[8];
+  uint8_t rx_idx = 0;
+
+  while (true) {
+    while (Serial.available() > 0) {
+      uint8_t b = (uint8_t)Serial.read();
+      if (rx_idx == 0) {
+        if (b == SYNC_0) rx_buf[rx_idx++] = b;
+      } else if (rx_idx == 1) {
+        if (b == SYNC_1) rx_buf[rx_idx++] = b;
+        else rx_idx = (b == SYNC_0) ? 1 : 0;
+      } else {
+        rx_buf[rx_idx++] = b;
+        if (rx_idx == 8) {
+          if (compute_xor(rx_buf, 7) == rx_buf[7]) {
+            process_command(rx_buf);
+          }
+          rx_idx = 0;
+        }
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+
 void setup() {
+  Serial.setRxBufferSize(4096);
+  Serial.setTxBufferSize(8192);
   Serial.begin(921600);
   g_serial_mutex = xSemaphoreCreateMutex();
   build_cali_lut(3);
   apply_test_generator(g_cfg.test_gen_code);
 
-  xTaskCreate(scope_capture_task, "scope_adc", 6144, nullptr, 4, nullptr);
+  // Higher priority for command RX so Stop/Config/Bootloader always preempt ADC capture
+  xTaskCreate(protocol_rx_task, "scope_proto", 4096, nullptr, 5, nullptr);
+  xTaskCreate(scope_capture_task, "scope_adc", 6144, nullptr, 3, nullptr);
 }
 
 void loop() {
-  static uint8_t rx_buf[8];
-  static uint8_t rx_idx = 0;
-
-  while (Serial.available() > 0) {
-    uint8_t b = (uint8_t)Serial.read();
-    if (rx_idx == 0) {
-      if (b == SYNC_0) rx_buf[rx_idx++] = b;
-    } else if (rx_idx == 1) {
-      if (b == SYNC_1) rx_buf[rx_idx++] = b;
-      else rx_idx = (b == SYNC_0) ? 1 : 0;
-    } else {
-      rx_buf[rx_idx++] = b;
-      if (rx_idx == 8) {
-        if (compute_xor(rx_buf, 7) == rx_buf[7]) {
-          process_command(rx_buf);
-        }
-        rx_idx = 0;
-      }
-    }
-  }
-  vTaskDelay(pdMS_TO_TICKS(1));
+  vTaskDelay(pdMS_TO_TICKS(1000));
 }

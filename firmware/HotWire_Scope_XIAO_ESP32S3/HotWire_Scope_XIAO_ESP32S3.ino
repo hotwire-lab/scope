@@ -322,13 +322,14 @@ static void scope_capture_task(void* arg) {
     uint16_t post_samples = want_samples - pre_samples;
     bool     cali_en = g_cfg.cali_enabled;
 
-    // Frame rate pacing: keep draining DMA pool while waiting so next trigger gets fresh samples
+    // Frame rate pacing: drain DMA briefly and yield so FreeRTOS / USB stay responsive
     uint8_t  fps_c = g_cfg.target_fps;
     uint32_t min_interval_ms = 1000U / max<uint8_t>(fps_c, 1);
     uint32_t now_ms = millis();
     if (run_mode == 1 && (now_ms - last_tx_ms) < min_interval_ms) {
       uint32_t dummy_ret = 0;
-      adc_continuous_read(g_adc_handle, g_dma_buf, DMA_READ_BYTES, &dummy_ret, 5);
+      adc_continuous_read(g_adc_handle, g_dma_buf, DMA_READ_BYTES, &dummy_ret, 2);
+      vTaskDelay(pdMS_TO_TICKS(2));
       continue;
     }
 
@@ -522,8 +523,10 @@ static void process_command(const uint8_t cmd[8]) {
       break;
     case CMD_BOOTLOADER:
       if (cmd[3] == 0xB0 && cmd[4] == 0x07 && cmd[5] == 0x10 && cmd[6] == 0xAD) {
-        stop_adc();
+        g_cfg.run_mode = 0;
+        vTaskDelay(pdMS_TO_TICKS(25));
         REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+        vTaskDelay(pdMS_TO_TICKS(10));
         esp_restart();
       }
       break;
@@ -532,37 +535,47 @@ static void process_command(const uint8_t cmd[8]) {
   }
 }
 
+// Core 0 Task: Dedicated USB CDC Binary Command Receiver (never starved by Core 1 ADC)
+static void protocol_rx_task(void* arg) {
+  (void)arg;
+  uint8_t rx_buf[8];
+  uint8_t rx_idx = 0;
+
+  while (true) {
+    while (Serial.available() > 0) {
+      uint8_t b = (uint8_t)Serial.read();
+      if (rx_idx == 0) {
+        if (b == SYNC_0) rx_buf[rx_idx++] = b;
+      } else if (rx_idx == 1) {
+        if (b == SYNC_1) rx_buf[rx_idx++] = b;
+        else rx_idx = (b == SYNC_0) ? 1 : 0;
+      } else {
+        rx_buf[rx_idx++] = b;
+        if (rx_idx == 8) {
+          if (compute_xor(rx_buf, 7) == rx_buf[7]) {
+            process_command(rx_buf);
+          }
+          rx_idx = 0;
+        }
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+
 void setup() {
-  Serial.begin(921600);
+  Serial.setRxBufferSize(4096);
   Serial.setTxBufferSize(8192);
+  Serial.begin(921600);
   g_serial_mutex = xSemaphoreCreateMutex();
   build_cali_lut(3);
   apply_test_generator(g_cfg.test_gen_code);
 
-  // Pin GDMA ADC acquisition + triggering to Core 1
-  xTaskCreatePinnedToCore(scope_capture_task, "scope_adc", 8192, nullptr, 5, nullptr, 1);
+  // Core 0: USB CDC command demuxer; Core 1: GDMA ADC capture & trigger engine
+  xTaskCreatePinnedToCore(protocol_rx_task, "scope_proto", 4096, nullptr, 4, nullptr, 0);
+  xTaskCreatePinnedToCore(scope_capture_task, "scope_adc", 8192, nullptr, 3, nullptr, 1);
 }
 
 void loop() {
-  static uint8_t rx_buf[8];
-  static uint8_t rx_idx = 0;
-
-  while (Serial.available() > 0) {
-    uint8_t b = (uint8_t)Serial.read();
-    if (rx_idx == 0) {
-      if (b == SYNC_0) rx_buf[rx_idx++] = b;
-    } else if (rx_idx == 1) {
-      if (b == SYNC_1) rx_buf[rx_idx++] = b;
-      else rx_idx = (b == SYNC_0) ? 1 : 0;
-    } else {
-      rx_buf[rx_idx++] = b;
-      if (rx_idx == 8) {
-        if (compute_xor(rx_buf, 7) == rx_buf[7]) {
-          process_command(rx_buf);
-        }
-        rx_idx = 0;
-      }
-    }
-  }
-  vTaskDelay(pdMS_TO_TICKS(1));
+  vTaskDelay(pdMS_TO_TICKS(1000));
 }
