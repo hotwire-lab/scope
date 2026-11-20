@@ -25,6 +25,7 @@ pub fn build_command_frame(cmd_id: u8, p1: u8, p2: u8, p3: u8, p4: u8) -> [u8; 8
     frame
 }
 
+#[allow(dead_code)]
 pub fn build_ping_status_cmd() -> [u8; 8] {
     build_command_frame(CMD_PING_STATUS, 0, 0, 0, 0)
 }

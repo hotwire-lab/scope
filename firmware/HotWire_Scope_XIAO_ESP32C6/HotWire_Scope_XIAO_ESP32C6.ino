@@ -106,6 +106,22 @@ static uint8_t compute_xor(const uint8_t* data, size_t len) {
   return x;
 }
 
+static void serial_write_all(const uint8_t* data, size_t len) {
+  size_t sent = 0;
+  uint32_t start_ms = millis();
+  while (sent < len) {
+    size_t chunk = min<size_t>(512, len - sent);
+    size_t written = Serial.write(data + sent, chunk);
+    if (written > 0) {
+      sent += written;
+      start_ms = millis();
+    } else {
+      if ((millis() - start_ms) > 250) break;
+      vTaskDelay(pdMS_TO_TICKS(1));
+    }
+  }
+}
+
 static void send_frame(uint8_t type_id, const uint8_t* payload, uint16_t len) {
   uint8_t hdr[5] = {
     SYNC_0, SYNC_1, type_id,
@@ -114,9 +130,9 @@ static void send_frame(uint8_t type_id, const uint8_t* payload, uint16_t len) {
   uint8_t chk = compute_xor(hdr, 5) ^ compute_xor(payload, len);
 
   if (g_serial_mutex) xSemaphoreTake(g_serial_mutex, portMAX_DELAY);
-  Serial.write(hdr, 5);
-  if (len > 0) Serial.write(payload, len);
-  Serial.write(&chk, 1);
+  serial_write_all(hdr, 5);
+  if (len > 0) serial_write_all(payload, len);
+  serial_write_all(&chk, 1);
   if (g_serial_mutex) xSemaphoreGive(g_serial_mutex);
 }
 
@@ -270,16 +286,19 @@ static void scope_capture_task(void* arg) {
     }
 
     size_t write_idx[3] = { 0, 0, 0 };
+    size_t ch_trig_pos[3] = { 0, 0, 0 };
     size_t total_trig_ch = 0;
     bool triggered = false;
-    size_t trig_ring_pos = 0;
     size_t post_collected = 0;
     bool saturated = false;
 
+    uint8_t  rate_c_init = g_cfg.rate_code;
+    uint32_t per_ch_est = max<uint32_t>(RATE_TABLE[min<uint8_t>(rate_c_init, 6)] / active_cnt, 1000);
+    uint32_t window_ms = (uint32_t)(((uint64_t)want_samples * 1000ULL) / per_ch_est);
     uint32_t acq_start_ms = millis();
-    uint32_t timeout_ms = (trig_mode == 1 || run_mode == 2) ? 1200 : 140;
-    uint16_t prev_trig_val = trig_mv;
-    bool has_prev = false;
+    uint32_t timeout_ms = (trig_mode == 1 || run_mode == 2) ? max<uint32_t>(1200, window_ms + 400) : max<uint32_t>(140, window_ms + 120);
+    static const int16_t TRIG_HYST_MV = 15;
+    bool trig_armed = false;
 
     while (g_cfg.run_mode != 0 && !g_cfg.adc_dirty) {
       uint32_t ret_num = 0;
@@ -305,19 +324,28 @@ static void scope_capture_task(void* arg) {
               if (trig_mode == 3) {
                 if (total_trig_ch >= pre_samples) {
                   triggered = true;
-                  trig_ring_pos = pos;
+                  for (uint8_t c = 0; c < 3; ++c) {
+                    ch_trig_pos[c] = (write_idx[c] > 0 ? (write_idx[c] - 1) : 0) & (RING_CAP - 1);
+                  }
                 }
-              } else if (has_prev && total_trig_ch >= pre_samples) {
-                bool crossed = (trig_edge == 0)
-                  ? (prev_trig_val < trig_mv && mv >= trig_mv)
-                  : (prev_trig_val > trig_mv && mv <= trig_mv);
-                if (crossed) {
-                  triggered = true;
-                  trig_ring_pos = pos;
+              } else {
+                int16_t mv_i = (int16_t)mv;
+                int16_t th_i = (int16_t)trig_mv;
+                if (!trig_armed) {
+                  if ((trig_edge == 0 && mv_i <= th_i - TRIG_HYST_MV) ||
+                      (trig_edge == 1 && mv_i >= th_i + TRIG_HYST_MV)) {
+                    trig_armed = true;
+                  }
+                } else if (total_trig_ch >= pre_samples) {
+                  bool crossed = (trig_edge == 0) ? (mv_i >= th_i) : (mv_i <= th_i);
+                  if (crossed) {
+                    triggered = true;
+                    for (uint8_t c = 0; c < 3; ++c) {
+                      ch_trig_pos[c] = (write_idx[c] > 0 ? (write_idx[c] - 1) : 0) & (RING_CAP - 1);
+                    }
+                  }
                 }
               }
-              prev_trig_val = mv;
-              has_prev = true;
             } else {
               post_collected++;
               if (post_collected >= post_samples) break;
@@ -329,7 +357,10 @@ static void scope_capture_task(void* arg) {
       if (triggered && post_collected >= post_samples) break;
       if (!triggered && (millis() - acq_start_ms) >= timeout_ms) {
         if (trig_mode == 0 && total_trig_ch >= want_samples) {
-          trig_ring_pos = (write_idx[trig_ch] - post_samples) & (RING_CAP - 1);
+          for (uint8_t c = 0; c < 3; ++c) {
+            size_t w = write_idx[c];
+            ch_trig_pos[c] = (w >= post_samples ? (w - post_samples) : 0) & (RING_CAP - 1);
+          }
           break;
         } else if (trig_mode == 1) {
           acq_start_ms = millis();
@@ -354,10 +385,10 @@ static void scope_capture_task(void* arg) {
     if (cali_en) flags |= FLAG_CALIBRATED_MV;
     if (saturated) flags |= FLAG_ADC_SATURATED;
 
-    size_t start_pos = (trig_ring_pos + RING_CAP - pre_samples) & (RING_CAP - 1);
     size_t out_idx = 0;
     for (uint8_t ch = 0; ch < 3; ++ch) {
       if ((ch_mask & (1 << ch)) == 0) continue;
+      size_t start_pos = (ch_trig_pos[ch] + RING_CAP - pre_samples) & (RING_CAP - 1);
       for (uint16_t k = 0; k < want_samples; ++k) {
         g_tx_samples[out_idx++] = g_ring[ch][(start_pos + k) & (RING_CAP - 1)];
       }

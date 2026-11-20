@@ -148,7 +148,8 @@ pub fn ScopeCanvas(
 
             ctx.set_fill_style_str("#f97316");
             ctx.set_font("600 10px ui-monospace, SFMono-Regular, Menlo, monospace");
-            let _ = ctx.fill_text(&format!("T{}", trig_ch + 1), pad_l + 4.0, ty - 4.0);
+            let label_y = (ty - 4.0).clamp(pad_t + 11.0, pad_t + scope_h - 3.0);
+            let _ = ctx.fill_text(&format!("T{}", trig_ch + 1), pad_l + 4.0, label_y);
 
             // Plot active channels
             let denom_n = n.saturating_sub(1).max(1) as f64;

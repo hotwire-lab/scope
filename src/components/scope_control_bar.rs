@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 
+use crate::protocol::codec::resolve_atten_preset;
 use crate::protocol::types::*;
 
 #[component]
@@ -102,6 +103,11 @@ pub fn ScopeControlBar(
                     on:change=move |ev| {
                         if let Ok(v) = event_target_value(&ev).parse::<u8>() {
                             atten_code.set(v);
+                            let max_mv = resolve_atten_preset(v).full_scale_mv;
+                            if trig_level_mv.get_untracked() > max_mv {
+                                trig_level_mv.set(max_mv / 2);
+                                on_apply_trig.run(());
+                            }
                             on_apply_cfg.run(());
                         }
                     }
@@ -188,8 +194,8 @@ pub fn ScopeControlBar(
                     <input
                         type="range"
                         class="trig-slider"
-                        min="50"
-                        max="3100"
+                        min="25"
+                        max=move || resolve_atten_preset(atten_code.get()).full_scale_mv.to_string()
                         step="25"
                         prop:value=move || trig_level_mv.get().to_string()
                         on:input=move |ev| {

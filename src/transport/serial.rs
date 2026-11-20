@@ -4,7 +4,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::protocol::codec::{build_bootloader_cmd, build_get_caps_cmd, build_ping_status_cmd};
+use crate::protocol::codec::{build_bootloader_cmd, build_get_caps_cmd};
 use crate::transport::demo::DemoSimulator;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,10 +76,7 @@ extern "C" {
 }
 
 fn init_command_bytes() -> Vec<u8> {
-    let mut cmds = Vec::with_capacity(16);
-    cmds.extend_from_slice(&build_get_caps_cmd());
-    cmds.extend_from_slice(&build_ping_status_cmd());
-    cmds
+    build_get_caps_cmd().to_vec()
 }
 
 type StateCallback = Rc<RefCell<Option<Box<dyn FnMut(TransportSnapshot)>>>>;
