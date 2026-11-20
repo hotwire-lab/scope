@@ -128,55 +128,51 @@ impl SerialTransport {
 
         let snap_ref = self.snapshot.clone();
         let on_state_ref = self.on_state.clone();
-        let state_cb = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
-            let status_str = js_sys::Reflect::get(&val, &JsValue::from_str("status"))
-                .ok()
-                .and_then(|v| v.as_string())
-                .unwrap_or_default();
-            let transport_str = js_sys::Reflect::get(&val, &JsValue::from_str("transport"))
-                .ok()
-                .and_then(|v| v.as_string())
-                .unwrap_or_default();
-            let device_name = js_sys::Reflect::get(&val, &JsValue::from_str("deviceName"))
-                .ok()
-                .and_then(|v| v.as_string())
-                .unwrap_or_else(|| "Waiting for USB...".to_string());
-            let vid_pid = js_sys::Reflect::get(&val, &JsValue::from_str("vidPid"))
-                .ok()
-                .and_then(|v| v.as_string())
-                .unwrap_or_default();
-            let error_message = js_sys::Reflect::get(&val, &JsValue::from_str("errorMessage"))
-                .ok()
-                .and_then(|v| v.as_string());
+        let state_cb = Closure::<dyn FnMut(String, String, String, String, String)>::new(
+            move |status_str: String,
+                  transport_str: String,
+                  device_name: String,
+                  vid_pid: String,
+                  error_str: String| {
+                let error_message = if error_str.is_empty() {
+                    None
+                } else {
+                    Some(error_str)
+                };
 
-            let next = TransportSnapshot {
-                status: match status_str.as_str() {
-                    "connecting" => ConnectionStatus::Connecting,
-                    "connected" => ConnectionStatus::Connected,
-                    _ => ConnectionStatus::Waiting,
-                },
-                transport: match transport_str.as_str() {
-                    "webserial" => TransportKind::WebSerial,
-                    "webusb" => TransportKind::WebUsb,
-                    _ => TransportKind::None,
-                },
-                device_name,
-                vid_pid,
-                error_message,
-            };
+                let next = TransportSnapshot {
+                    status: match status_str.as_str() {
+                        "connecting" => ConnectionStatus::Connecting,
+                        "connected" => ConnectionStatus::Connected,
+                        _ => ConnectionStatus::Waiting,
+                    },
+                    transport: match transport_str.as_str() {
+                        "webserial" => TransportKind::WebSerial,
+                        "webusb" => TransportKind::WebUsb,
+                        _ => TransportKind::None,
+                    },
+                    device_name: if device_name.is_empty() {
+                        "Waiting for USB...".to_string()
+                    } else {
+                        device_name
+                    },
+                    vid_pid,
+                    error_message,
+                };
 
-            // Do not overwrite Demo mode unless USB actually connects
-            if snap_ref.borrow().transport == TransportKind::Demo
-                && next.status != ConnectionStatus::Connected
-            {
-                return;
-            }
+                // Do not overwrite Demo mode unless USB actually connects
+                if snap_ref.borrow().transport == TransportKind::Demo
+                    && next.status != ConnectionStatus::Connected
+                {
+                    return;
+                }
 
-            *snap_ref.borrow_mut() = next.clone();
-            if let Some(cb) = on_state_ref.borrow_mut().as_mut() {
-                cb(next);
-            }
-        });
+                *snap_ref.borrow_mut() = next.clone();
+                if let Some(cb) = on_state_ref.borrow_mut().as_mut() {
+                    cb(next);
+                }
+            },
+        );
 
         let on_bytes_ref = self.on_bytes.clone();
         let bytes_cb = Closure::<dyn FnMut(js_sys::Uint8Array)>::new(move |arr: js_sys::Uint8Array| {

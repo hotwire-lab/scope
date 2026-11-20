@@ -151,6 +151,10 @@ pub fn ScopeCanvas(
             let _ = ctx.fill_text(&format!("T{}", trig_ch + 1), pad_l + 4.0, ty - 4.0);
 
             // Plot active channels
+            let denom_n = n.saturating_sub(1).max(1) as f64;
+            let draw_start = start_idx.saturating_sub(1);
+            let draw_end = (end_idx + 1).min(n);
+
             for ch in 0..4usize {
                 let samples = &frame.channels_mv[ch];
                 if samples.is_empty() {
@@ -164,24 +168,106 @@ pub fn ScopeCanvas(
 
                 ctx.set_stroke_style_str(color);
                 ctx.set_line_width(1.8);
-                ctx.begin_path();
+                ctx.set_line_join("round");
+                ctx.set_line_cap("round");
+
                 let visible_count = (end_idx - start_idx).max(1);
-                let step = (visible_count as f64 / (plot_w * 1.5)).floor().max(1.0) as usize;
-                let mut first = true;
-                let mut i = start_idx;
-                while i < end_idx {
-                    let norm_i = (i as f64) / (n.saturating_sub(1).max(1) as f64);
-                    let x = pad_l + ((norm_i - start_norm) / span) * plot_w;
-                    let y = pad_t + scope_h * (1.0 - ((samples[i] as f64) / vref_mv).clamp(0.0, 1.0));
-                    if first {
-                        ctx.move_to(x, y);
-                        first = false;
-                    } else {
-                        ctx.line_to(x, y);
+                let dx_per_sample = plot_w / (visible_count as f64);
+
+                if dx_per_sample > 1.5 && draw_end > draw_start + 1 {
+                    // Collect visible screen-space points and fit a smooth monotone cubic Hermite spline
+                    // (Fritsch-Carlson) so zoomed waveforms curve smoothly through adjacent samples
+                    // without artificial ringing on flat square-wave rails.
+                    let count = draw_end - draw_start;
+                    let mut xs = Vec::with_capacity(count);
+                    let mut ys = Vec::with_capacity(count);
+                    for (idx, &mv) in samples[draw_start..draw_end].iter().enumerate() {
+                        let i = draw_start + idx;
+                        let norm_i = (i as f64) / denom_n;
+                        let x = pad_l + ((norm_i - start_norm) / span) * plot_w;
+                        let y = pad_t + scope_h * (1.0 - ((mv as f64) / vref_mv).clamp(0.0, 1.0));
+                        xs.push(x);
+                        ys.push(y);
                     }
-                    i += step;
+
+                    let m_cnt = xs.len();
+                    let mut secants = vec![0.0f64; m_cnt - 1];
+                    for k in 0..(m_cnt - 1) {
+                        let dx = (xs[k + 1] - xs[k]).max(1e-6);
+                        secants[k] = (ys[k + 1] - ys[k]) / dx;
+                    }
+
+                    let mut tangents = vec![0.0f64; m_cnt];
+                    tangents[0] = secants[0];
+                    tangents[m_cnt - 1] = secants[m_cnt - 2];
+                    for k in 1..(m_cnt - 1) {
+                        let s0 = secants[k - 1];
+                        let s1 = secants[k];
+                        if s0 * s1 <= 0.0 {
+                            tangents[k] = 0.0;
+                        } else {
+                            tangents[k] = 2.0 * s0 * s1 / (s0 + s1);
+                        }
+                    }
+
+                    // Fritsch-Carlson monotonicity clamp
+                    for k in 0..(m_cnt - 1) {
+                        let sk = secants[k];
+                        if sk.abs() < 1e-9 {
+                            tangents[k] = 0.0;
+                            tangents[k + 1] = 0.0;
+                        } else {
+                            let a = tangents[k] / sk;
+                            let b = tangents[k + 1] / sk;
+                            let h = (a * a + b * b).sqrt();
+                            if h > 3.0 {
+                                let t = 3.0 / h;
+                                tangents[k] = t * a * sk;
+                                tangents[k + 1] = t * b * sk;
+                            }
+                        }
+                    }
+
+                    ctx.begin_path();
+                    ctx.move_to(xs[0], ys[0]);
+                    for k in 0..(m_cnt - 1) {
+                        let dx = (xs[k + 1] - xs[k]) / 3.0;
+                        let cp1x = xs[k] + dx;
+                        let cp1y = ys[k] + tangents[k] * dx;
+                        let cp2x = xs[k + 1] - dx;
+                        let cp2y = ys[k + 1] - tangents[k + 1] * dx;
+                        ctx.bezier_curve_to(cp1x, cp1y, cp2x, cp2y, xs[k + 1], ys[k + 1]);
+                    }
+                    ctx.stroke();
+
+                    // Show measured ADC sample points when deeply zoomed in
+                    if dx_per_sample >= 10.0 {
+                        ctx.set_fill_style_str(color);
+                        for k in 0..m_cnt {
+                            ctx.begin_path();
+                            let _ = ctx.arc(xs[k], ys[k], 2.4, 0.0, std::f64::consts::TAU);
+                            ctx.fill();
+                        }
+                    }
+                } else {
+                    ctx.begin_path();
+                    let step = (visible_count as f64 / (plot_w * 1.5)).floor().max(1.0) as usize;
+                    let mut first = true;
+                    let mut i = draw_start;
+                    while i < draw_end {
+                        let norm_i = (i as f64) / denom_n;
+                        let x = pad_l + ((norm_i - start_norm) / span) * plot_w;
+                        let y = pad_t + scope_h * (1.0 - ((samples[i] as f64) / vref_mv).clamp(0.0, 1.0));
+                        if first {
+                            ctx.move_to(x, y);
+                            first = false;
+                        } else {
+                            ctx.line_to(x, y);
+                        }
+                        i += step;
+                    }
+                    ctx.stroke();
                 }
-                ctx.stroke();
                 ctx.restore();
             }
 
