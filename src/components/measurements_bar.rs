@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use leptos::prelude::*;
 
 use crate::dsp::scope_dsp::{format_freq, format_time_us, format_voltage_mv, measure_channel};
@@ -5,7 +7,7 @@ use crate::protocol::types::{ScopeFrame, CHANNEL_COLORS, CHANNEL_NAMES};
 
 #[component]
 pub fn MeasurementsBar(
-    latest_frame: RwSignal<Option<ScopeFrame>>,
+    latest_frame: RwSignal<Option<Arc<ScopeFrame>>>,
     show_cursors: RwSignal<bool>,
     cursor_a_norm: RwSignal<f64>,
     cursor_b_norm: RwSignal<f64>,

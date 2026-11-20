@@ -55,6 +55,7 @@ static const uint8_t TYPE_SCOPE_DATA = 0x86;
 static const uint8_t FLAG_TRIGGERED     = 0x01;
 static const uint8_t FLAG_CALIBRATED_MV = 0x04;
 static const uint8_t FLAG_ADC_SATURATED = 0x08;
+static const uint8_t FLAG_PACKED_12BIT  = 0x10;
 
 // ESP32-C6 digital SAR controller max spec is 83,333 Hz
 static const uint32_t RATE_TABLE[7]   = { 10000, 20000, 50000, 83333, 83333, 83333, 83333 };
@@ -98,11 +99,19 @@ static constexpr size_t DMA_READ_BYTES = 2048;
 static uint8_t  g_dma_buf[DMA_READ_BYTES];
 static constexpr size_t RING_CAP = 8192;
 static uint16_t g_ring[3][RING_CAP];
-static uint16_t g_tx_samples[3 * 4096];
+static uint8_t  g_frame_payload[16 + (3 * 4096 * 3) / 2];
 
 static uint8_t compute_xor(const uint8_t* data, size_t len) {
-  uint8_t x = 0;
-  for (size_t i = 0; i < len; ++i) x ^= data[i];
+  uint32_t acc = 0;
+  size_t i = 0;
+  while (i + 4 <= len) {
+    uint32_t w;
+    memcpy(&w, data + i, 4);
+    acc ^= w;
+    i += 4;
+  }
+  uint8_t x = (uint8_t)((acc) ^ (acc >> 8) ^ (acc >> 16) ^ (acc >> 24));
+  while (i < len) x ^= data[i++];
   return x;
 }
 
@@ -110,7 +119,7 @@ static void serial_write_all(const uint8_t* data, size_t len) {
   size_t sent = 0;
   uint32_t start_ms = millis();
   while (sent < len) {
-    size_t chunk = min<size_t>(512, len - sent);
+    size_t chunk = min<size_t>(1024, len - sent);
     size_t written = Serial.write(data + sent, chunk);
     if (written > 0) {
       sent += written;
@@ -286,7 +295,8 @@ static void scope_capture_task(void* arg) {
     uint8_t  fps_c = g_cfg.target_fps;
     uint32_t min_interval_ms = 1000U / max<uint8_t>(fps_c, 1);
     if (run_mode == 1 && (millis() - last_tx_ms) < min_interval_ms) {
-      vTaskDelay(pdMS_TO_TICKS(2));
+      uint32_t dummy_ret = 0;
+      adc_continuous_read(g_adc_handle, g_dma_buf, DMA_READ_BYTES, &dummy_ret, 5);
       continue;
     }
 
@@ -385,38 +395,52 @@ static void scope_capture_task(void* arg) {
     uint8_t  atten_code = min<uint8_t>(atten_c, 3);
     uint16_t vref_mv = VREF_TABLE[atten_code];
 
-    uint8_t flags = 0;
+    uint8_t flags = FLAG_PACKED_12BIT;
     if (triggered && trig_mode != 3) flags |= FLAG_TRIGGERED;
     if (cali_en) flags |= FLAG_CALIBRATED_MV;
     if (saturated) flags |= FLAG_ADC_SATURATED;
 
-    size_t out_idx = 0;
+    uint8_t* dst = &g_frame_payload[16];
+    size_t dst_len = 0;
+    bool has_pending = false;
+    uint16_t s0 = 0;
     for (uint8_t ch = 0; ch < 3; ++ch) {
       if ((ch_mask & (1 << ch)) == 0) continue;
       size_t start_pos = (ch_trig_pos[ch] + RING_CAP - pre_samples) & (RING_CAP - 1);
       for (uint16_t k = 0; k < want_samples; ++k) {
-        g_tx_samples[out_idx++] = g_ring[ch][(start_pos + k) & (RING_CAP - 1)];
+        uint16_t s = g_ring[ch][(start_pos + k) & (RING_CAP - 1)] & 0x0FFF;
+        if (!has_pending) {
+          s0 = s;
+          has_pending = true;
+        } else {
+          dst[dst_len++] = (uint8_t)(s0 & 0xFF);
+          dst[dst_len++] = (uint8_t)(((s0 >> 8) & 0x0F) | ((s & 0x0F) << 4));
+          dst[dst_len++] = (uint8_t)((s >> 4) & 0xFF);
+          has_pending = false;
+        }
       }
     }
+    if (has_pending) {
+      dst[dst_len++] = (uint8_t)(s0 & 0xFF);
+      dst[dst_len++] = (uint8_t)((s0 >> 8) & 0x0F);
+    }
 
-    uint16_t payload_len = 16 + (uint16_t)(out_idx * 2);
-    static uint8_t frame_payload[16 + 3 * 4096 * 2];
-    memcpy(&frame_payload[0], &per_ch_rate, 4);
-    frame_payload[4] = ch_mask;
-    frame_payload[5] = atten_code;
-    frame_payload[6] = flags;
-    frame_payload[7] = trig_ch;
-    frame_payload[8]  = (uint8_t)(want_samples & 0xFF);
-    frame_payload[9]  = (uint8_t)((want_samples >> 8) & 0xFF);
-    frame_payload[10] = (uint8_t)(pre_samples & 0xFF);
-    frame_payload[11] = (uint8_t)((pre_samples >> 8) & 0xFF);
-    frame_payload[12] = (uint8_t)(trig_mv & 0xFF);
-    frame_payload[13] = (uint8_t)((trig_mv >> 8) & 0xFF);
-    frame_payload[14] = (uint8_t)(vref_mv & 0xFF);
-    frame_payload[15] = (uint8_t)((vref_mv >> 8) & 0xFF);
-    memcpy(&frame_payload[16], g_tx_samples, out_idx * 2);
+    uint16_t payload_len = 16 + (uint16_t)dst_len;
+    memcpy(&g_frame_payload[0], &per_ch_rate, 4);
+    g_frame_payload[4] = ch_mask;
+    g_frame_payload[5] = atten_code;
+    g_frame_payload[6] = flags;
+    g_frame_payload[7] = trig_ch;
+    g_frame_payload[8]  = (uint8_t)(want_samples & 0xFF);
+    g_frame_payload[9]  = (uint8_t)((want_samples >> 8) & 0xFF);
+    g_frame_payload[10] = (uint8_t)(pre_samples & 0xFF);
+    g_frame_payload[11] = (uint8_t)((pre_samples >> 8) & 0xFF);
+    g_frame_payload[12] = (uint8_t)(trig_mv & 0xFF);
+    g_frame_payload[13] = (uint8_t)((trig_mv >> 8) & 0xFF);
+    g_frame_payload[14] = (uint8_t)(vref_mv & 0xFF);
+    g_frame_payload[15] = (uint8_t)((vref_mv >> 8) & 0xFF);
 
-    send_frame(TYPE_SCOPE_DATA, frame_payload, payload_len);
+    send_frame(TYPE_SCOPE_DATA, g_frame_payload, payload_len);
     last_tx_ms = millis();
 
     if (run_mode == 2) g_cfg.run_mode = 0;

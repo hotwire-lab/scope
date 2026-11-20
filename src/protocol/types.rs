@@ -32,6 +32,7 @@ pub const SCOPE_FLAG_TRIGGERED: u8 = 0x01;
 pub const SCOPE_FLAG_OVERCLOCKED: u8 = 0x02;
 pub const SCOPE_FLAG_CALIBRATED_MV: u8 = 0x04;
 pub const SCOPE_FLAG_ADC_SATURATED: u8 = 0x08;
+pub const SCOPE_FLAG_PACKED_12BIT: u8 = 0x10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScopeRatePreset {

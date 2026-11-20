@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use leptos::html;
 use leptos::prelude::*;
@@ -6,6 +7,14 @@ use wasm_bindgen::JsCast;
 
 use crate::dsp::scope_dsp::{compute_fft_dbv, format_freq, format_time_us};
 use crate::protocol::types::{PersistenceMode, ScopeFrame, CHANNEL_COLORS, CHANNEL_NAMES};
+
+#[derive(Default)]
+struct ScratchSpline {
+    xs: Vec<f64>,
+    ys: Vec<f64>,
+    secants: Vec<f64>,
+    tangents: Vec<f64>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragTarget {
@@ -31,7 +40,7 @@ struct PhosphorKey {
 #[component]
 #[allow(clippy::too_many_arguments)]
 pub fn ScopeCanvas(
-    latest_frame: RwSignal<Option<ScopeFrame>>,
+    latest_frame: RwSignal<Option<Arc<ScopeFrame>>>,
     frame_version: RwSignal<u64>,
     trig_level_mv: RwSignal<u16>,
     trig_channel: RwSignal<u8>,
@@ -50,16 +59,16 @@ pub fn ScopeCanvas(
     let drag_start_x = StoredValue::new(0.0f64);
     let drag_start_pan = StoredValue::new(0.0f64);
 
-    // Persistence state:
-    // - `history` holds recent frames for decaying persistence (0.5s / 2s / 5s)
-    // - `phosphor_canvas` holds accumulated trails for Infinite (∞) persistence
-    let history = StoredValue::new_local(VecDeque::<ScopeFrame>::with_capacity(64));
+    // Persistence & zero-allocation rendering state
+    let history = StoredValue::new_local(VecDeque::<Arc<ScopeFrame>>::with_capacity(64));
+    let scratch = StoredValue::new_local(ScratchSpline::default());
     let last_recorded_ver = StoredValue::new(0u64);
     let last_clear_ver = StoredValue::new(0u64);
     let last_mode = StoredValue::new(PersistenceMode::Off);
     let phosphor_canvas = StoredValue::new_local(None::<web_sys::HtmlCanvasElement>);
     let phosphor_key = StoredValue::new(None::<PhosphorKey>);
     let resize_ver = RwSignal::new(0u64);
+    let raf_pending = StoredValue::new(false);
 
     // Trigger canvas redraw when the browser window is resized (important when paused/single-shot)
     if let Some(win) = web_sys::window() {
@@ -70,22 +79,20 @@ pub fn ScopeCanvas(
         cb.forget();
     }
 
-    // Re-render whenever a new frame arrives or any view parameter changes
-    Effect::new(move |_| {
-        let _rv = resize_ver.get();
-        let ver = frame_version.get();
-        let frame_opt = latest_frame.get();
-        let trig_mv = trig_level_mv.get();
-        let trig_ch = trig_channel.get();
-        let fft_on = show_fft.get();
-        let fft_ch = fft_channel.get() as usize;
-        let cursors_on = show_cursors.get();
-        let ca = cursor_a_norm.get();
-        let cb = cursor_b_norm.get();
-        let z = zoom.get().max(1.0);
-        let pan = pan_norm.get();
-        let persist = persistence_mode.get();
-        let clear_v = persist_clear_ver.get();
+    let render_now = move || {
+        let ver = frame_version.get_untracked();
+        let frame_opt = latest_frame.get_untracked();
+        let trig_mv = trig_level_mv.get_untracked();
+        let trig_ch = trig_channel.get_untracked();
+        let fft_on = show_fft.get_untracked();
+        let fft_ch = fft_channel.get_untracked() as usize;
+        let cursors_on = show_cursors.get_untracked();
+        let ca = cursor_a_norm.get_untracked();
+        let cb = cursor_b_norm.get_untracked();
+        let z = zoom.get_untracked().max(1.0);
+        let pan = pan_norm.get_untracked();
+        let persist = persistence_mode.get_untracked();
+        let clear_v = persist_clear_ver.get_untracked();
 
         // Clear persistence buffers on explicit clear or mode change
         if clear_v != last_clear_ver.get_value() || persist != last_mode.get_value() {
@@ -220,32 +227,35 @@ pub fn ScopeCanvas(
                 });
 
                 // Render historical decaying frames (oldest -> newest, excluding the very latest)
-                history.with_value(|h| {
-                    let count = h.len();
-                    for (idx, old_frame) in h.iter().enumerate() {
-                        if idx + 1 == count {
-                            break;
+                scratch.update_value(|sc| {
+                    history.with_value(|h| {
+                        let count = h.len();
+                        for (idx, old_frame) in h.iter().enumerate() {
+                            if idx + 1 == count {
+                                break;
+                            }
+                            let age = (now_ts - old_frame.timestamp_ms).clamp(0.0, decay_ms);
+                            let frac = (1.0 - age / decay_ms).clamp(0.0, 1.0);
+                            let alpha = frac.powf(1.6) * 0.52;
+                            if alpha > 0.02 {
+                                draw_frame_channels(
+                                    &ctx,
+                                    old_frame,
+                                    sc,
+                                    pad_l,
+                                    pad_t,
+                                    plot_w,
+                                    scope_h,
+                                    start_norm,
+                                    end_norm,
+                                    span,
+                                    alpha,
+                                    1.2,
+                                    false,
+                                );
+                            }
                         }
-                        let age = (now_ts - old_frame.timestamp_ms).clamp(0.0, decay_ms);
-                        let frac = (1.0 - age / decay_ms).clamp(0.0, 1.0);
-                        let alpha = frac.powf(1.6) * 0.52;
-                        if alpha > 0.02 {
-                            draw_frame_channels(
-                                &ctx,
-                                old_frame,
-                                pad_l,
-                                pad_t,
-                                plot_w,
-                                scope_h,
-                                start_norm,
-                                end_norm,
-                                span,
-                                alpha,
-                                1.2,
-                                false,
-                            );
-                        }
-                    }
+                    });
                 });
             } else if persist == PersistenceMode::Infinite {
                 let desired_key = PhosphorKey {
@@ -273,20 +283,23 @@ pub fn ScopeCanvas(
                                 phosphor_key.set_value(Some(desired_key));
                             }
                             if is_new_frame || needs_reset {
-                                draw_frame_channels(
-                                    &p_ctx,
-                                    frame,
-                                    pad_l,
-                                    pad_t,
-                                    plot_w,
-                                    scope_h,
-                                    start_norm,
-                                    end_norm,
-                                    span,
-                                    0.24,
-                                    1.2,
-                                    false,
-                                );
+                                scratch.update_value(|sc| {
+                                    draw_frame_channels(
+                                        &p_ctx,
+                                        frame,
+                                        sc,
+                                        pad_l,
+                                        pad_t,
+                                        plot_w,
+                                        scope_h,
+                                        start_norm,
+                                        end_norm,
+                                        span,
+                                        0.24,
+                                        1.2,
+                                        false,
+                                    );
+                                });
                             }
                         }
                     }
@@ -300,20 +313,23 @@ pub fn ScopeCanvas(
             }
 
             // Draw current live waveform on top at full brightness
-            draw_frame_channels(
-                &ctx,
-                frame,
-                pad_l,
-                pad_t,
-                plot_w,
-                scope_h,
-                start_norm,
-                end_norm,
-                span,
-                1.0,
-                1.8,
-                true,
-            );
+            scratch.update_value(|sc| {
+                draw_frame_channels(
+                    &ctx,
+                    frame,
+                    sc,
+                    pad_l,
+                    pad_t,
+                    plot_w,
+                    scope_h,
+                    start_norm,
+                    end_norm,
+                    span,
+                    1.0,
+                    1.8,
+                    true,
+                );
+            });
 
             // Time axis labels
             let total_us = (n as f64) / (frame.sample_rate_hz as f64) * 1_000_000.0;
@@ -387,6 +403,39 @@ pub fn ScopeCanvas(
                 pad_l + plot_w * 0.5 - 155.0,
                 pad_t + scope_h * 0.5,
             );
+        }
+    };
+
+    // Coalesce redraws onto the browser's requestAnimationFrame cadence (max 1 paint per vsync)
+    Effect::new(move |_| {
+        let _ = resize_ver.get();
+        let _ = frame_version.get();
+        let _ = latest_frame.with(|f| f.is_some());
+        let _ = trig_level_mv.get();
+        let _ = trig_channel.get();
+        let _ = show_fft.get();
+        let _ = fft_channel.get();
+        let _ = show_cursors.get();
+        let _ = cursor_a_norm.get();
+        let _ = cursor_b_norm.get();
+        let _ = zoom.get();
+        let _ = pan_norm.get();
+        let _ = persistence_mode.get();
+        let _ = persist_clear_ver.get();
+
+        if raf_pending.get_value() {
+            return;
+        }
+        raf_pending.set_value(true);
+        if let Some(win) = web_sys::window() {
+            let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+                raf_pending.set_value(false);
+                render_now();
+            });
+            let _ = win.request_animation_frame(cb.unchecked_ref());
+        } else {
+            raf_pending.set_value(false);
+            render_now();
         }
     });
 
@@ -504,6 +553,7 @@ fn ensure_phosphor_canvas(
 fn draw_frame_channels(
     ctx: &web_sys::CanvasRenderingContext2d,
     frame: &ScopeFrame,
+    sc: &mut ScratchSpline,
     pad_l: f64,
     pad_t: f64,
     plot_w: f64,
@@ -549,65 +599,63 @@ fn draw_frame_channels(
         ctx.set_line_cap("round");
 
         if dx_per_sample > 1.5 && draw_end > draw_start + 1 {
-            // Monotone cubic Hermite spline (Fritsch-Carlson) for smooth zoomed curves
-            let count = draw_end - draw_start;
-            let mut xs = Vec::with_capacity(count);
-            let mut ys = Vec::with_capacity(count);
+            // Monotone cubic Hermite spline (Fritsch-Carlson) using reusable scratch buffers (0 allocs)
+            sc.xs.clear();
+            sc.ys.clear();
             for (idx, &mv) in samples[draw_start..draw_end].iter().enumerate() {
                 let i = draw_start + idx;
                 let norm_i = (i as f64) / denom_n;
                 let x = pad_l + ((norm_i - start_norm) / span) * plot_w;
                 let y = pad_t + scope_h * (1.0 - ((mv as f64) / vref_mv).clamp(0.0, 1.0));
-                xs.push(x);
-                ys.push(y);
+                sc.xs.push(x);
+                sc.ys.push(y);
             }
 
-            let m_cnt = xs.len();
-            let mut secants = vec![0.0f64; m_cnt - 1];
+            let m_cnt = sc.xs.len();
+            sc.secants.clear();
             for k in 0..(m_cnt - 1) {
-                let dx = (xs[k + 1] - xs[k]).max(1e-6);
-                secants[k] = (ys[k + 1] - ys[k]) / dx;
+                let dx = (sc.xs[k + 1] - sc.xs[k]).max(1e-6);
+                sc.secants.push((sc.ys[k + 1] - sc.ys[k]) / dx);
             }
 
-            let mut tangents = vec![0.0f64; m_cnt];
-            tangents[0] = secants[0];
-            tangents[m_cnt - 1] = secants[m_cnt - 2];
+            sc.tangents.clear();
+            sc.tangents.resize(m_cnt, 0.0);
+            sc.tangents[0] = sc.secants[0];
+            sc.tangents[m_cnt - 1] = sc.secants[m_cnt - 2];
             for k in 1..(m_cnt - 1) {
-                let s0 = secants[k - 1];
-                let s1 = secants[k];
-                if s0 * s1 <= 0.0 {
-                    tangents[k] = 0.0;
-                } else {
-                    tangents[k] = 2.0 * s0 * s1 / (s0 + s1);
+                let s0 = sc.secants[k - 1];
+                let s1 = sc.secants[k];
+                if s0 * s1 > 0.0 {
+                    sc.tangents[k] = 2.0 * s0 * s1 / (s0 + s1);
                 }
             }
 
             for k in 0..(m_cnt - 1) {
-                let sk = secants[k];
+                let sk = sc.secants[k];
                 if sk.abs() < 1e-9 {
-                    tangents[k] = 0.0;
-                    tangents[k + 1] = 0.0;
+                    sc.tangents[k] = 0.0;
+                    sc.tangents[k + 1] = 0.0;
                 } else {
-                    let a = tangents[k] / sk;
-                    let b = tangents[k + 1] / sk;
+                    let a = sc.tangents[k] / sk;
+                    let b = sc.tangents[k + 1] / sk;
                     let h = (a * a + b * b).sqrt();
                     if h > 3.0 {
                         let t = 3.0 / h;
-                        tangents[k] = t * a * sk;
-                        tangents[k + 1] = t * b * sk;
+                        sc.tangents[k] = t * a * sk;
+                        sc.tangents[k + 1] = t * b * sk;
                     }
                 }
             }
 
             ctx.begin_path();
-            ctx.move_to(xs[0], ys[0]);
+            ctx.move_to(sc.xs[0], sc.ys[0]);
             for k in 0..(m_cnt - 1) {
-                let dx = (xs[k + 1] - xs[k]) / 3.0;
-                let cp1x = xs[k] + dx;
-                let cp1y = ys[k] + tangents[k] * dx;
-                let cp2x = xs[k + 1] - dx;
-                let cp2y = ys[k + 1] - tangents[k + 1] * dx;
-                ctx.bezier_curve_to(cp1x, cp1y, cp2x, cp2y, xs[k + 1], ys[k + 1]);
+                let dx = (sc.xs[k + 1] - sc.xs[k]) / 3.0;
+                let cp1x = sc.xs[k] + dx;
+                let cp1y = sc.ys[k] + sc.tangents[k] * dx;
+                let cp2x = sc.xs[k + 1] - dx;
+                let cp2y = sc.ys[k + 1] - sc.tangents[k + 1] * dx;
+                ctx.bezier_curve_to(cp1x, cp1y, cp2x, cp2y, sc.xs[k + 1], sc.ys[k + 1]);
             }
             ctx.stroke();
 
@@ -615,7 +663,7 @@ fn draw_frame_channels(
                 ctx.set_fill_style_str(color);
                 for k in 0..m_cnt {
                     ctx.begin_path();
-                    let _ = ctx.arc(xs[k], ys[k], 2.4, 0.0, std::f64::consts::TAU);
+                    let _ = ctx.arc(sc.xs[k], sc.ys[k], 2.4, 0.0, std::f64::consts::TAU);
                     ctx.fill();
                 }
             }

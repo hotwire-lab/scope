@@ -212,7 +212,7 @@ impl DemoSimulator {
             }
         }
 
-        let mut flags = 0u8;
+        let mut flags = SCOPE_FLAG_PACKED_12BIT;
         if locked {
             flags |= SCOPE_FLAG_TRIGGERED;
         }

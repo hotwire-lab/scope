@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use leptos::prelude::*;
 
 use crate::components::bottom_drawer::BottomDrawer;
@@ -52,13 +54,15 @@ pub fn App() -> impl IntoView {
     let persistence_mode = RwSignal::new(PersistenceMode::Off);
     let persist_clear_ver = RwSignal::new(0u64);
 
-    // Telemetry & frames
-    let latest_frame = RwSignal::new(None::<ScopeFrame>);
+    // Telemetry & frames (Arc<ScopeFrame> avoids deep-cloning waveform buffers across UI & persistence)
+    let latest_frame = RwSignal::new(None::<Arc<ScopeFrame>>);
+    let meas_frame = RwSignal::new(None::<Arc<ScopeFrame>>);
     let frame_version = RwSignal::new(0u64);
     let fps = RwSignal::new(0.0f64);
     let drawer_open = RwSignal::new(false);
 
     let last_frame_ts = StoredValue::new(0.0f64);
+    let last_meas_ts = StoredValue::new(0.0f64);
     let demuxer = StoredValue::new_local(ProtocolDemuxer::new());
 
     let send_cfg = move || {
@@ -128,8 +132,16 @@ pub fn App() -> impl IntoView {
                                 }
                             }
                             last_frame_ts.set_value(now);
-                            latest_frame.set(Some(scope_frame));
+                            let arc_frame = Arc::new(scope_frame);
+                            latest_frame.set(Some(arc_frame.clone()));
                             frame_version.update(|v| *v = v.wrapping_add(1));
+
+                            // Throttle numeric measurement DOM updates to ~10 Hz (immediate on single-shot / first frame)
+                            let prev_m = last_meas_ts.get_value();
+                            if prev_m == 0.0 || !running.get_untracked() || (now - prev_m) >= 100.0 {
+                                last_meas_ts.set_value(now);
+                                meas_frame.set(Some(arc_frame));
+                            }
                         }
                     });
                 });
@@ -237,7 +249,7 @@ pub fn App() -> impl IntoView {
             </main>
 
             <MeasurementsBar
-                latest_frame=latest_frame
+                latest_frame=meas_frame
                 show_cursors=show_cursors
                 cursor_a_norm=cursor_a_norm
                 cursor_b_norm=cursor_b_norm

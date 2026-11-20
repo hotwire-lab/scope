@@ -174,8 +174,14 @@ pub fn decode_scope_frame(payload: &[u8], timestamp_ms: f64) -> Option<ScopeFram
         return None;
     }
 
-    let expected_bytes = 16 + active_channels * samples_per_ch * 2;
-    if payload.len() < expected_bytes {
+    let packed_12bit = (status_flags & SCOPE_FLAG_PACKED_12BIT) != 0;
+    let total_samples = active_channels * samples_per_ch;
+    let expected_data_bytes = if packed_12bit {
+        (total_samples * 3).div_ceil(2)
+    } else {
+        total_samples * 2
+    };
+    if payload.len() < 16 + expected_data_bytes {
         return None;
     }
 
@@ -187,17 +193,38 @@ pub fn decode_scope_frame(payload: &[u8], timestamp_ms: f64) -> Option<ScopeFram
     };
 
     let mut channels_mv: [Vec<f32>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-    let mut offset = 16usize;
 
-    for (ch, slot) in channels_mv.iter_mut().enumerate() {
-        if (channel_mask & (1 << ch)) != 0 {
-            let mut vec = Vec::with_capacity(samples_per_ch);
-            for _ in 0..samples_per_ch {
-                let raw = u16::from_le_bytes([payload[offset], payload[offset + 1]]);
-                offset += 2;
-                vec.push((raw as f32) * scale);
+    if packed_12bit {
+        let data = &payload[16..];
+        let mut sample_idx = 0usize;
+        for (ch, slot) in channels_mv.iter_mut().enumerate() {
+            if (channel_mask & (1 << ch)) != 0 {
+                let mut vec = Vec::with_capacity(samples_per_ch);
+                for _ in 0..samples_per_ch {
+                    let pair_byte = (sample_idx / 2) * 3;
+                    let raw = if sample_idx.is_multiple_of(2) {
+                        (data[pair_byte] as u16) | (((data[pair_byte + 1] & 0x0f) as u16) << 8)
+                    } else {
+                        ((data[pair_byte + 1] >> 4) as u16) | ((data[pair_byte + 2] as u16) << 4)
+                    };
+                    sample_idx += 1;
+                    vec.push((raw as f32) * scale);
+                }
+                *slot = vec;
             }
-            *slot = vec;
+        }
+    } else {
+        let mut offset = 16usize;
+        for (ch, slot) in channels_mv.iter_mut().enumerate() {
+            if (channel_mask & (1 << ch)) != 0 {
+                let mut vec = Vec::with_capacity(samples_per_ch);
+                for _ in 0..samples_per_ch {
+                    let raw = u16::from_le_bytes([payload[offset], payload[offset + 1]]);
+                    offset += 2;
+                    vec.push((raw as f32) * scale);
+                }
+                *slot = vec;
+            }
         }
     }
 
@@ -243,8 +270,27 @@ pub fn encode_scope_frame_payload(
     out.extend_from_slice(&trigger_index.to_le_bytes());
     out.extend_from_slice(&trigger_level_mv.to_le_bytes());
     out.extend_from_slice(&vref_mv.to_le_bytes());
-    for &s in planar_samples_u16 {
-        out.extend_from_slice(&s.to_le_bytes());
+    let packed_12bit = (status_flags & SCOPE_FLAG_PACKED_12BIT) != 0;
+    if packed_12bit {
+        let mut i = 0;
+        while i < planar_samples_u16.len() {
+            let s0 = planar_samples_u16[i] & 0x0fff;
+            let s1 = if i + 1 < planar_samples_u16.len() {
+                planar_samples_u16[i + 1] & 0x0fff
+            } else {
+                0
+            };
+            out.push((s0 & 0xff) as u8);
+            out.push((((s0 >> 8) & 0x0f) | ((s1 & 0x0f) << 4)) as u8);
+            if i + 1 < planar_samples_u16.len() {
+                out.push(((s1 >> 4) & 0xff) as u8);
+            }
+            i += 2;
+        }
+    } else {
+        for &s in planar_samples_u16 {
+            out.extend_from_slice(&s.to_le_bytes());
+        }
     }
     out
 }
@@ -285,5 +331,27 @@ mod tests {
         assert_eq!(decoded.channels_mv[0], vec![100.0, 1500.0, 3000.0]);
         assert_eq!(decoded.channels_mv[1], vec![500.0, 1200.0, 2400.0]);
         assert!(decoded.channels_mv[2].is_empty());
+    }
+
+    #[test]
+    fn scope_frame_packed_12bit_roundtrip() {
+        let samples = vec![0u16, 1234, 2468, 3300, 4095, 512];
+        let payload = encode_scope_frame_payload(
+            200_000,
+            0x03,
+            3,
+            SCOPE_FLAG_TRIGGERED | SCOPE_FLAG_CALIBRATED_MV | SCOPE_FLAG_PACKED_12BIT,
+            0,
+            3,
+            1,
+            1500,
+            3100,
+            &samples,
+        );
+        // 16 header bytes + 9 packed bytes (6 samples * 1.5) = 25 bytes vs 28 bytes unpacked
+        assert_eq!(payload.len(), 25);
+        let decoded = decode_scope_frame(&payload, 20.0).expect("valid packed frame");
+        assert_eq!(decoded.channels_mv[0], vec![0.0, 1234.0, 2468.0]);
+        assert_eq!(decoded.channels_mv[1], vec![3300.0, 4095.0, 512.0]);
     }
 }
