@@ -8,8 +8,8 @@ use crate::components::top_toolbar::TopToolbar;
 use crate::protocol::codec::{build_scope_cfg_cmd, build_scope_run_cmd, build_scope_trig_cmd};
 use crate::protocol::demuxer::ProtocolDemuxer;
 use crate::protocol::types::{
-    BoardCapabilitiesFrame, DecodedFrame, ScopeFrame, SCOPE_EDGE_RISING, SCOPE_RUN_CONTINUOUS,
-    SCOPE_RUN_SINGLE, SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
+    BoardCapabilitiesFrame, DecodedFrame, PersistenceMode, ScopeFrame, SCOPE_EDGE_RISING,
+    SCOPE_RUN_CONTINUOUS, SCOPE_RUN_SINGLE, SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
 };
 use crate::transport::serial::{ConnectionStatus, SerialTransport, TransportSnapshot};
 
@@ -49,6 +49,8 @@ pub fn App() -> impl IntoView {
     let cursor_b_norm = RwSignal::new(0.75f64);
     let zoom = RwSignal::new(1.0f64);
     let pan_norm = RwSignal::new(0.0f64);
+    let persistence_mode = RwSignal::new(PersistenceMode::Off);
+    let persist_clear_ver = RwSignal::new(0u64);
 
     // Telemetry & frames
     let latest_frame = RwSignal::new(None::<ScopeFrame>);
@@ -159,7 +161,13 @@ pub fn App() -> impl IntoView {
         drawer_open.update(|v| *v = !*v);
     });
     let on_close_drawer = Callback::new(move |_| drawer_open.set(false));
-    let on_apply_cfg = Callback::new(move |_| send_cfg());
+    let on_apply_cfg = Callback::new(move |_| {
+        persist_clear_ver.update(|v| *v = v.wrapping_add(1));
+        send_cfg();
+    });
+    let on_clear_persist = Callback::new(move |_| {
+        persist_clear_ver.update(|v| *v = v.wrapping_add(1));
+    });
     let on_apply_trig = Callback::new(move |_| send_trig());
     let on_apply_run = Callback::new(move |_| {
         send_run(if running.get_untracked() {
@@ -202,6 +210,8 @@ pub fn App() -> impl IntoView {
                 show_fft=show_fft
                 show_cursors=show_cursors
                 fft_channel=fft_channel
+                persistence_mode=persistence_mode
+                on_clear_persist=on_clear_persist
                 on_apply_cfg=on_apply_cfg
                 on_apply_trig=on_apply_trig
                 on_apply_run=on_apply_run
@@ -221,6 +231,8 @@ pub fn App() -> impl IntoView {
                     cursor_b_norm=cursor_b_norm
                     zoom=zoom
                     pan_norm=pan_norm
+                    persistence_mode=persistence_mode
+                    persist_clear_ver=persist_clear_ver
                 />
             </main>
 

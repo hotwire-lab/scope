@@ -1,9 +1,11 @@
+use std::collections::VecDeque;
+
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::dsp::scope_dsp::{compute_fft_dbv, format_freq, format_time_us};
-use crate::protocol::types::{ScopeFrame, CHANNEL_COLORS, CHANNEL_NAMES};
+use crate::protocol::types::{PersistenceMode, ScopeFrame, CHANNEL_COLORS, CHANNEL_NAMES};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragTarget {
@@ -11,6 +13,19 @@ enum DragTarget {
     CursorA,
     CursorB,
     Pan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PhosphorKey {
+    width: u32,
+    height: u32,
+    zoom_bits: u64,
+    pan_bits: u64,
+    fft_on: bool,
+    atten_code: u8,
+    sample_rate_hz: u32,
+    samples_per_ch: usize,
+    clear_ver: u64,
 }
 
 #[component]
@@ -27,15 +42,27 @@ pub fn ScopeCanvas(
     cursor_b_norm: RwSignal<f64>,
     zoom: RwSignal<f64>,
     pan_norm: RwSignal<f64>,
+    persistence_mode: RwSignal<PersistenceMode>,
+    persist_clear_ver: RwSignal<u64>,
 ) -> impl IntoView {
     let canvas_ref = NodeRef::<html::Canvas>::new();
     let drag_target = StoredValue::new(DragTarget::None);
     let drag_start_x = StoredValue::new(0.0f64);
     let drag_start_pan = StoredValue::new(0.0f64);
 
+    // Persistence state:
+    // - `history` holds recent frames for decaying persistence (0.5s / 2s / 5s)
+    // - `phosphor_canvas` holds accumulated trails for Infinite (∞) persistence
+    let history = StoredValue::new_local(VecDeque::<ScopeFrame>::with_capacity(64));
+    let last_recorded_ver = StoredValue::new(0u64);
+    let last_clear_ver = StoredValue::new(0u64);
+    let last_mode = StoredValue::new(PersistenceMode::Off);
+    let phosphor_canvas = StoredValue::new_local(None::<web_sys::HtmlCanvasElement>);
+    let phosphor_key = StoredValue::new(None::<PhosphorKey>);
+
     // Re-render whenever a new frame arrives or any view parameter changes
     Effect::new(move |_| {
-        let _ver = frame_version.get();
+        let ver = frame_version.get();
         let frame_opt = latest_frame.get();
         let trig_mv = trig_level_mv.get();
         let trig_ch = trig_channel.get();
@@ -46,6 +73,21 @@ pub fn ScopeCanvas(
         let cb = cursor_b_norm.get();
         let z = zoom.get().max(1.0);
         let pan = pan_norm.get();
+        let persist = persistence_mode.get();
+        let clear_v = persist_clear_ver.get();
+
+        // Clear persistence buffers on explicit clear or mode change
+        if clear_v != last_clear_ver.get_value() || persist != last_mode.get_value() {
+            last_clear_ver.set_value(clear_v);
+            last_mode.set_value(persist);
+            history.update_value(|h| h.clear());
+            phosphor_key.set_value(None);
+        }
+
+        let is_new_frame = ver != last_recorded_ver.get_value();
+        if is_new_frame {
+            last_recorded_ver.set_value(ver);
+        }
 
         let Some(canvas) = canvas_ref.get() else {
             return;
@@ -104,12 +146,6 @@ pub fn ScopeCanvas(
             let start_norm = pan.clamp(0.0, (1.0 - span).max(0.0));
             let end_norm = (start_norm + span).min(1.0);
 
-            let start_idx = ((start_norm * (n.saturating_sub(1) as f64)).floor() as usize)
-                .min(n.saturating_sub(1));
-            let end_idx = ((end_norm * (n.saturating_sub(1) as f64)).ceil() as usize)
-                .max(start_idx + 1)
-                .min(n);
-
             // Trigger time vertical marker
             let trig_norm = (frame.trigger_index as f64) / (n.saturating_sub(1).max(1) as f64);
             if trig_norm >= start_norm && trig_norm <= end_norm {
@@ -151,126 +187,122 @@ pub fn ScopeCanvas(
             let label_y = (ty - 4.0).clamp(pad_t + 11.0, pad_t + scope_h - 3.0);
             let _ = ctx.fill_text(&format!("T{}", trig_ch + 1), pad_l + 4.0, label_y);
 
-            // Plot active channels
-            let denom_n = n.saturating_sub(1).max(1) as f64;
-            let draw_start = start_idx.saturating_sub(1);
-            let draw_end = (end_idx + 1).min(n);
-
-            for ch in 0..4usize {
-                let samples = &frame.channels_mv[ch];
-                if samples.is_empty() {
-                    continue;
+            // --- Persistence Layer ---
+            if let Some(decay_ms) = persist.decay_ms() {
+                if is_new_frame {
+                    history.update_value(|h| {
+                        h.push_back(frame.clone());
+                        while h.len() > 64 {
+                            h.pop_front();
+                        }
+                    });
                 }
-                let color = CHANNEL_COLORS[ch];
-                ctx.save();
-                ctx.begin_path();
-                ctx.rect(pad_l, pad_t, plot_w, scope_h);
-                ctx.clip();
-
-                ctx.set_stroke_style_str(color);
-                ctx.set_line_width(1.8);
-                ctx.set_line_join("round");
-                ctx.set_line_cap("round");
-
-                let visible_count = (end_idx - start_idx).max(1);
-                let dx_per_sample = plot_w / (visible_count as f64);
-
-                if dx_per_sample > 1.5 && draw_end > draw_start + 1 {
-                    // Collect visible screen-space points and fit a smooth monotone cubic Hermite spline
-                    // (Fritsch-Carlson) so zoomed waveforms curve smoothly through adjacent samples
-                    // without artificial ringing on flat square-wave rails.
-                    let count = draw_end - draw_start;
-                    let mut xs = Vec::with_capacity(count);
-                    let mut ys = Vec::with_capacity(count);
-                    for (idx, &mv) in samples[draw_start..draw_end].iter().enumerate() {
-                        let i = draw_start + idx;
-                        let norm_i = (i as f64) / denom_n;
-                        let x = pad_l + ((norm_i - start_norm) / span) * plot_w;
-                        let y = pad_t + scope_h * (1.0 - ((mv as f64) / vref_mv).clamp(0.0, 1.0));
-                        xs.push(x);
-                        ys.push(y);
-                    }
-
-                    let m_cnt = xs.len();
-                    let mut secants = vec![0.0f64; m_cnt - 1];
-                    for k in 0..(m_cnt - 1) {
-                        let dx = (xs[k + 1] - xs[k]).max(1e-6);
-                        secants[k] = (ys[k + 1] - ys[k]) / dx;
-                    }
-
-                    let mut tangents = vec![0.0f64; m_cnt];
-                    tangents[0] = secants[0];
-                    tangents[m_cnt - 1] = secants[m_cnt - 2];
-                    for k in 1..(m_cnt - 1) {
-                        let s0 = secants[k - 1];
-                        let s1 = secants[k];
-                        if s0 * s1 <= 0.0 {
-                            tangents[k] = 0.0;
+                let now_ts = frame.timestamp_ms;
+                history.update_value(|h| {
+                    while let Some(front) = h.front() {
+                        if now_ts - front.timestamp_ms > decay_ms {
+                            h.pop_front();
                         } else {
-                            tangents[k] = 2.0 * s0 * s1 / (s0 + s1);
+                            break;
                         }
                     }
+                });
 
-                    // Fritsch-Carlson monotonicity clamp
-                    for k in 0..(m_cnt - 1) {
-                        let sk = secants[k];
-                        if sk.abs() < 1e-9 {
-                            tangents[k] = 0.0;
-                            tangents[k + 1] = 0.0;
-                        } else {
-                            let a = tangents[k] / sk;
-                            let b = tangents[k + 1] / sk;
-                            let h = (a * a + b * b).sqrt();
-                            if h > 3.0 {
-                                let t = 3.0 / h;
-                                tangents[k] = t * a * sk;
-                                tangents[k + 1] = t * b * sk;
+                // Render historical decaying frames (oldest -> newest, excluding the very latest)
+                history.with_value(|h| {
+                    let count = h.len();
+                    for (idx, old_frame) in h.iter().enumerate() {
+                        if idx + 1 == count {
+                            break;
+                        }
+                        let age = (now_ts - old_frame.timestamp_ms).clamp(0.0, decay_ms);
+                        let frac = (1.0 - age / decay_ms).clamp(0.0, 1.0);
+                        let alpha = frac.powf(1.6) * 0.52;
+                        if alpha > 0.02 {
+                            draw_frame_channels(
+                                &ctx,
+                                old_frame,
+                                pad_l,
+                                pad_t,
+                                plot_w,
+                                scope_h,
+                                start_norm,
+                                end_norm,
+                                span,
+                                alpha,
+                                1.2,
+                                false,
+                            );
+                        }
+                    }
+                });
+            } else if persist == PersistenceMode::Infinite {
+                let desired_key = PhosphorKey {
+                    width: target_w,
+                    height: target_h,
+                    zoom_bits: z.to_bits(),
+                    pan_bits: start_norm.to_bits(),
+                    fft_on,
+                    atten_code: frame.atten_code,
+                    sample_rate_hz: frame.sample_rate_hz,
+                    samples_per_ch: frame.samples_per_ch,
+                    clear_ver: clear_v,
+                };
+
+                let needs_reset = phosphor_key.get_value() != Some(desired_key);
+                let offscreen = ensure_phosphor_canvas(&phosphor_canvas, target_w, target_h);
+
+                if let Some(p_canvas) = offscreen {
+                    if let Ok(Some(p_ctx_obj)) = p_canvas.get_context("2d") {
+                        if let Ok(p_ctx) = p_ctx_obj.dyn_into::<web_sys::CanvasRenderingContext2d>()
+                        {
+                            let _ = p_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+                            if needs_reset {
+                                p_ctx.clear_rect(0.0, 0.0, css_w, css_h);
+                                phosphor_key.set_value(Some(desired_key));
+                            }
+                            if is_new_frame || needs_reset {
+                                draw_frame_channels(
+                                    &p_ctx,
+                                    frame,
+                                    pad_l,
+                                    pad_t,
+                                    plot_w,
+                                    scope_h,
+                                    start_norm,
+                                    end_norm,
+                                    span,
+                                    0.24,
+                                    1.2,
+                                    false,
+                                );
                             }
                         }
                     }
 
-                    ctx.begin_path();
-                    ctx.move_to(xs[0], ys[0]);
-                    for k in 0..(m_cnt - 1) {
-                        let dx = (xs[k + 1] - xs[k]) / 3.0;
-                        let cp1x = xs[k] + dx;
-                        let cp1y = ys[k] + tangents[k] * dx;
-                        let cp2x = xs[k + 1] - dx;
-                        let cp2y = ys[k + 1] - tangents[k + 1] * dx;
-                        ctx.bezier_curve_to(cp1x, cp1y, cp2x, cp2y, xs[k + 1], ys[k + 1]);
-                    }
-                    ctx.stroke();
-
-                    // Show measured ADC sample points when deeply zoomed in
-                    if dx_per_sample >= 10.0 {
-                        ctx.set_fill_style_str(color);
-                        for k in 0..m_cnt {
-                            ctx.begin_path();
-                            let _ = ctx.arc(xs[k], ys[k], 2.4, 0.0, std::f64::consts::TAU);
-                            ctx.fill();
-                        }
-                    }
-                } else {
-                    ctx.begin_path();
-                    let step = (visible_count as f64 / (plot_w * 1.5)).floor().max(1.0) as usize;
-                    let mut first = true;
-                    let mut i = draw_start;
-                    while i < draw_end {
-                        let norm_i = (i as f64) / denom_n;
-                        let x = pad_l + ((norm_i - start_norm) / span) * plot_w;
-                        let y = pad_t + scope_h * (1.0 - ((samples[i] as f64) / vref_mv).clamp(0.0, 1.0));
-                        if first {
-                            ctx.move_to(x, y);
-                            first = false;
-                        } else {
-                            ctx.line_to(x, y);
-                        }
-                        i += step;
-                    }
-                    ctx.stroke();
+                    // Blit accumulated infinite phosphor layer behind live trace
+                    ctx.save();
+                    let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+                    let _ = ctx.draw_image_with_html_canvas_element(&p_canvas, 0.0, 0.0);
+                    ctx.restore();
                 }
-                ctx.restore();
             }
+
+            // Draw current live waveform on top at full brightness
+            draw_frame_channels(
+                &ctx,
+                frame,
+                pad_l,
+                pad_t,
+                plot_w,
+                scope_h,
+                start_norm,
+                end_norm,
+                span,
+                1.0,
+                1.8,
+                true,
+            );
 
             // Time axis labels
             let total_us = (n as f64) / (frame.sample_rate_hz as f64) * 1_000_000.0;
@@ -283,6 +315,13 @@ pub fn ScopeCanvas(
                 let x = pad_l + frac * plot_w;
                 let t_us = start_us + frac * visible_us;
                 let _ = ctx.fill_text(&format_time_us(t_us as f32), x - 14.0, pad_t + scope_h + 14.0);
+            }
+
+            // Status HUD top-left (Persistence badge)
+            if let Some(badge) = persist.badge() {
+                ctx.set_fill_style_str("#38bdf8");
+                ctx.set_font("700 10px ui-monospace, SFMono-Regular, Menlo, monospace");
+                let _ = ctx.fill_text(badge, pad_l + 2.0, pad_t - 6.0);
             }
 
             // Status HUD top-right
@@ -424,6 +463,172 @@ pub fn ScopeCanvas(
                 on:pointerleave=on_pointer_up
             />
         </div>
+    }
+}
+
+fn ensure_phosphor_canvas(
+    slot: &StoredValue<Option<web_sys::HtmlCanvasElement>, LocalStorage>,
+    width: u32,
+    height: u32,
+) -> Option<web_sys::HtmlCanvasElement> {
+    let existing = slot.get_value();
+    let canvas = match existing {
+        Some(c) => c,
+        None => {
+            let doc = web_sys::window()?.document()?;
+            let el = doc.create_element("canvas").ok()?;
+            let c = el.dyn_into::<web_sys::HtmlCanvasElement>().ok()?;
+            slot.set_value(Some(c.clone()));
+            c
+        }
+    };
+    if canvas.width() != width || canvas.height() != height {
+        canvas.set_width(width);
+        canvas.set_height(height);
+    }
+    Some(canvas)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_frame_channels(
+    ctx: &web_sys::CanvasRenderingContext2d,
+    frame: &ScopeFrame,
+    pad_l: f64,
+    pad_t: f64,
+    plot_w: f64,
+    scope_h: f64,
+    start_norm: f64,
+    end_norm: f64,
+    span: f64,
+    alpha: f64,
+    line_width: f64,
+    show_sample_dots: bool,
+) {
+    let n = frame.samples_per_ch;
+    if n < 2 {
+        return;
+    }
+    let vref_mv = (frame.vref_mv as f64).max(500.0);
+    let denom_n = (n - 1) as f64;
+    let start_idx = ((start_norm * denom_n).floor() as usize).min(n - 1);
+    let end_idx = ((end_norm * denom_n).ceil() as usize)
+        .max(start_idx + 1)
+        .min(n);
+    let draw_start = start_idx.saturating_sub(1);
+    let draw_end = (end_idx + 1).min(n);
+    let visible_count = (end_idx - start_idx).max(1);
+    let dx_per_sample = plot_w / (visible_count as f64);
+
+    for ch in 0..4usize {
+        let samples = &frame.channels_mv[ch];
+        if samples.len() < draw_end {
+            continue;
+        }
+        let color = CHANNEL_COLORS[ch];
+
+        ctx.save();
+        ctx.set_global_alpha(alpha);
+        ctx.begin_path();
+        ctx.rect(pad_l, pad_t, plot_w, scope_h);
+        ctx.clip();
+
+        ctx.set_stroke_style_str(color);
+        ctx.set_line_width(line_width);
+        ctx.set_line_join("round");
+        ctx.set_line_cap("round");
+
+        if dx_per_sample > 1.5 && draw_end > draw_start + 1 {
+            // Monotone cubic Hermite spline (Fritsch-Carlson) for smooth zoomed curves
+            let count = draw_end - draw_start;
+            let mut xs = Vec::with_capacity(count);
+            let mut ys = Vec::with_capacity(count);
+            for (idx, &mv) in samples[draw_start..draw_end].iter().enumerate() {
+                let i = draw_start + idx;
+                let norm_i = (i as f64) / denom_n;
+                let x = pad_l + ((norm_i - start_norm) / span) * plot_w;
+                let y = pad_t + scope_h * (1.0 - ((mv as f64) / vref_mv).clamp(0.0, 1.0));
+                xs.push(x);
+                ys.push(y);
+            }
+
+            let m_cnt = xs.len();
+            let mut secants = vec![0.0f64; m_cnt - 1];
+            for k in 0..(m_cnt - 1) {
+                let dx = (xs[k + 1] - xs[k]).max(1e-6);
+                secants[k] = (ys[k + 1] - ys[k]) / dx;
+            }
+
+            let mut tangents = vec![0.0f64; m_cnt];
+            tangents[0] = secants[0];
+            tangents[m_cnt - 1] = secants[m_cnt - 2];
+            for k in 1..(m_cnt - 1) {
+                let s0 = secants[k - 1];
+                let s1 = secants[k];
+                if s0 * s1 <= 0.0 {
+                    tangents[k] = 0.0;
+                } else {
+                    tangents[k] = 2.0 * s0 * s1 / (s0 + s1);
+                }
+            }
+
+            for k in 0..(m_cnt - 1) {
+                let sk = secants[k];
+                if sk.abs() < 1e-9 {
+                    tangents[k] = 0.0;
+                    tangents[k + 1] = 0.0;
+                } else {
+                    let a = tangents[k] / sk;
+                    let b = tangents[k + 1] / sk;
+                    let h = (a * a + b * b).sqrt();
+                    if h > 3.0 {
+                        let t = 3.0 / h;
+                        tangents[k] = t * a * sk;
+                        tangents[k + 1] = t * b * sk;
+                    }
+                }
+            }
+
+            ctx.begin_path();
+            ctx.move_to(xs[0], ys[0]);
+            for k in 0..(m_cnt - 1) {
+                let dx = (xs[k + 1] - xs[k]) / 3.0;
+                let cp1x = xs[k] + dx;
+                let cp1y = ys[k] + tangents[k] * dx;
+                let cp2x = xs[k + 1] - dx;
+                let cp2y = ys[k + 1] - tangents[k + 1] * dx;
+                ctx.bezier_curve_to(cp1x, cp1y, cp2x, cp2y, xs[k + 1], ys[k + 1]);
+            }
+            ctx.stroke();
+
+            if show_sample_dots && dx_per_sample >= 10.0 {
+                ctx.set_fill_style_str(color);
+                for k in 0..m_cnt {
+                    ctx.begin_path();
+                    let _ = ctx.arc(xs[k], ys[k], 2.4, 0.0, std::f64::consts::TAU);
+                    ctx.fill();
+                }
+            }
+        } else {
+            ctx.begin_path();
+            let step = (visible_count as f64 / (plot_w * 1.5)).floor().max(1.0) as usize;
+            let mut first = true;
+            let mut i = draw_start;
+            while i < draw_end {
+                let norm_i = (i as f64) / denom_n;
+                let x = pad_l + ((norm_i - start_norm) / span) * plot_w;
+                let y = pad_t + scope_h * (1.0 - ((samples[i] as f64) / vref_mv).clamp(0.0, 1.0));
+                if first {
+                    ctx.move_to(x, y);
+                    first = false;
+                } else {
+                    ctx.line_to(x, y);
+                }
+                i += step;
+            }
+            ctx.stroke();
+        }
+
+        ctx.restore();
     }
 }
 

@@ -192,6 +192,56 @@ pub const TEST_GEN_PRESETS: [TestGenPreset; 5] = [
 pub const CHANNEL_COLORS: [&str; 4] = ["#facc15", "#38bdf8", "#f472b6", "#4ade80"];
 pub const CHANNEL_NAMES: [&str; 4] = ["CH1 (D0)", "CH2 (D1)", "CH3 (D2)", "CH4 (D3)"];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistenceMode {
+    Off,
+    Decay500ms,
+    Decay2s,
+    Decay5s,
+    Infinite,
+}
+
+impl PersistenceMode {
+    pub fn as_code(self) -> &'static str {
+        match self {
+            PersistenceMode::Off => "off",
+            PersistenceMode::Decay500ms => "500ms",
+            PersistenceMode::Decay2s => "2s",
+            PersistenceMode::Decay5s => "5s",
+            PersistenceMode::Infinite => "inf",
+        }
+    }
+
+    pub fn from_code(s: &str) -> Self {
+        match s {
+            "500ms" => PersistenceMode::Decay500ms,
+            "2s" => PersistenceMode::Decay2s,
+            "5s" => PersistenceMode::Decay5s,
+            "inf" => PersistenceMode::Infinite,
+            _ => PersistenceMode::Off,
+        }
+    }
+
+    pub fn decay_ms(self) -> Option<f64> {
+        match self {
+            PersistenceMode::Decay500ms => Some(500.0),
+            PersistenceMode::Decay2s => Some(2000.0),
+            PersistenceMode::Decay5s => Some(5000.0),
+            _ => None,
+        }
+    }
+
+    pub fn badge(self) -> Option<&'static str> {
+        match self {
+            PersistenceMode::Off => None,
+            PersistenceMode::Decay500ms => Some("PERSIST 0.5s"),
+            PersistenceMode::Decay2s => Some("PERSIST 2.0s"),
+            PersistenceMode::Decay5s => Some("PERSIST 5.0s"),
+            PersistenceMode::Infinite => Some("PERSIST ∞"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoardCapabilitiesFrame {
     pub board: String,

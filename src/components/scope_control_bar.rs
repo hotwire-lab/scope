@@ -18,6 +18,8 @@ pub fn ScopeControlBar(
     show_fft: RwSignal<bool>,
     show_cursors: RwSignal<bool>,
     fft_channel: RwSignal<u8>,
+    persistence_mode: RwSignal<PersistenceMode>,
+    on_clear_persist: Callback<()>,
     on_apply_cfg: Callback<()>,
     on_apply_trig: Callback<()>,
     on_apply_run: Callback<()>,
@@ -274,6 +276,35 @@ pub fn ScopeControlBar(
                     >
                         "Cursors"
                     </button>
+                    <select
+                        class="ctrl-select ctrl-select-sm"
+                        title="Waveform Persistence / Afterglow"
+                        prop:value=move || persistence_mode.get().as_code()
+                        on:change=move |ev| {
+                            persistence_mode.set(PersistenceMode::from_code(&event_target_value(&ev)));
+                        }
+                    >
+                        <option value="off">"Persist: Off"</option>
+                        <option value="500ms">"Persist: 0.5 s"</option>
+                        <option value="2s">"Persist: 2 s"</option>
+                        <option value="5s">"Persist: 5 s"</option>
+                        <option value="inf">"Persist: ∞"</option>
+                    </select>
+                    {move || {
+                        if persistence_mode.get() != PersistenceMode::Off {
+                            Some(view! {
+                                <button
+                                    class="btn btn-sm btn-secondary"
+                                    on:click=move |_| on_clear_persist.run(())
+                                    title="Clear accumulated persistence trails"
+                                >
+                                    "Clear"
+                                </button>
+                            })
+                        } else {
+                            None
+                        }
+                    }}
                     <button
                         class="btn btn-sm btn-ghost"
                         on:click=move |_| on_reset_view.run(())
