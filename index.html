@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0D1117" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>HotWire Oscilloscope — 4-Ch 12-bit GDMA ADC Scope &amp; FFT (XIAO ESP32-S3 / C6)</title>
+    <meta
+      name="description"
+      content="Zero-install browser Digital Storage Oscilloscope &amp; FFT Spectrum Analyzer PWA for Seeed Studio XIAO ESP32-S3 and XIAO ESP32-C6 via Web Serial &amp; WebUSB. Rust/WASM + GDMA continuous ADC."
+    />
+    <meta
+      name="keywords"
+      content="ESP32-S3 oscilloscope, ESP32-C6 oscilloscope, XIAO ESP32-S3 ADC DMA, Web Serial oscilloscope, WebUSB oscilloscope, Rust WebAssembly oscilloscope, FFT analyzer, HotWire Oscilloscope"
+    />
+    <meta name="author" content="Kari Vierimaa, Kempele" />
+    <link rel="canonical" href="https://kavierim.github.io/HotWire-Oscilloscope/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://kavierim.github.io/HotWire-Oscilloscope/" />
+    <meta property="og:title" content="HotWire Oscilloscope — 4-Ch GDMA ADC Scope &amp; FFT (XIAO ESP32-S3 / C6)" />
+    <meta
+      property="og:description"
+      content="Real-time 4-channel 12-bit GDMA ADC Digital Storage Oscilloscope with eFuse calibration, edge triggering, A/B cursors, live FFT spectrum, and offline Demo simulator."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+
+    <link data-trunk rel="css" href="styles.css" />
+    <link data-trunk rel="copy-dir" href="public/firmware" />
+    <link data-trunk rel="copy-file" href="public/icon.svg" />
+    <link data-trunk rel="copy-file" href="public/manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="public/robots.txt" />
+    <link data-trunk rel="copy-file" href="public/sitemap.xml" />
+    <link data-trunk rel="copy-file" href="public/sw.js" />
+    <link data-trunk rel="copy-file" href="public/.nojekyll" />
+    <link data-trunk rel="rust" />
+  </head>
+  <body>
+    <script>
+      if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>

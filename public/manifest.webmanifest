@@ -1,0 +1,20 @@
+{
+  "name": "HotWire Oscilloscope — 4-Ch GDMA ADC Scope & FFT",
+  "short_name": "HotWire Scope",
+  "description": "4-Channel 12-bit GDMA ADC Oscilloscope & FFT Spectrum Analyzer PWA for Seeed Studio XIAO ESP32-S3 & ESP32-C6 via Web Serial and WebUSB.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0D1117",
+  "theme_color": "#0D1117",
+  "categories": ["developer", "utilities"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
