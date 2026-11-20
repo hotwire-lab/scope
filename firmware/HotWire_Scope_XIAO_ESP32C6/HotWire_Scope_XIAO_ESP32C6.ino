@@ -245,21 +245,25 @@ static void scope_capture_task(void* arg) {
     uint8_t  ch_mask = g_cfg.channel_mask & 0x07;
     if (ch_mask == 0) ch_mask = 0x01;
     uint8_t  active_cnt = __builtin_popcount(ch_mask);
-    uint16_t want_samples = DEPTH_TABLE[min<uint8_t>(g_cfg.depth_code, 3)];
+    uint8_t  depth_c = g_cfg.depth_code;
+    uint16_t want_samples = DEPTH_TABLE[min<uint8_t>(depth_c, 3)];
     uint8_t  trig_mode = g_cfg.trig_mode;
     uint8_t  trig_edge = g_cfg.trig_edge;
-    uint8_t  trig_ch = min<uint8_t>(g_cfg.trig_ch, 2);
+    uint8_t  trig_ch_raw = g_cfg.trig_ch;
+    uint8_t  trig_ch = min<uint8_t>(trig_ch_raw, 2);
     if ((ch_mask & (1 << trig_ch)) == 0) {
       for (uint8_t c = 0; c < 3; ++c) {
         if (ch_mask & (1 << c)) { trig_ch = c; break; }
       }
     }
     uint16_t trig_mv = g_cfg.trig_level_mv;
-    uint16_t pre_samples = (uint16_t)(((uint32_t)want_samples * min<uint8_t>(g_cfg.pre_trig_pct, 75)) / 100U);
+    uint8_t  pre_pct = g_cfg.pre_trig_pct;
+    uint16_t pre_samples = (uint16_t)(((uint32_t)want_samples * min<uint8_t>(pre_pct, 75)) / 100U);
     uint16_t post_samples = want_samples - pre_samples;
     bool     cali_en = g_cfg.cali_enabled;
 
-    uint32_t min_interval_ms = 1000U / max<uint8_t>(g_cfg.target_fps, 1);
+    uint8_t  fps_c = g_cfg.target_fps;
+    uint32_t min_interval_ms = 1000U / max<uint8_t>(fps_c, 1);
     if (run_mode == 1 && (millis() - last_tx_ms) < min_interval_ms) {
       vTaskDelay(pdMS_TO_TICKS(2));
       continue;
@@ -338,9 +342,11 @@ static void scope_capture_task(void* arg) {
 
     if (g_cfg.run_mode == 0 || g_cfg.adc_dirty) continue;
 
-    uint32_t total_rate = RATE_TABLE[min<uint8_t>(g_cfg.rate_code, 6)];
+    uint8_t  rate_c = g_cfg.rate_code;
+    uint32_t total_rate = RATE_TABLE[min<uint8_t>(rate_c, 6)];
     uint32_t per_ch_rate = max<uint32_t>(total_rate / active_cnt, 1000);
-    uint8_t  atten_code = min<uint8_t>(g_cfg.atten_code, 3);
+    uint8_t  atten_c = g_cfg.atten_code;
+    uint8_t  atten_code = min<uint8_t>(atten_c, 3);
     uint16_t vref_mv = VREF_TABLE[atten_code];
 
     uint8_t flags = 0;
