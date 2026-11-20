@@ -3,15 +3,18 @@ use std::sync::Arc;
 use leptos::prelude::*;
 
 use crate::components::bottom_drawer::BottomDrawer;
+use crate::components::channel_strip::ChannelStrip;
 use crate::components::measurements_bar::MeasurementsBar;
 use crate::components::scope_canvas::ScopeCanvas;
 use crate::components::scope_control_bar::ScopeControlBar;
 use crate::components::top_toolbar::TopToolbar;
+use crate::dsp::scope_dsp::{compute_autoset, compute_stack_configs};
 use crate::protocol::codec::{build_scope_cfg_cmd, build_scope_run_cmd, build_scope_trig_cmd};
 use crate::protocol::demuxer::ProtocolDemuxer;
 use crate::protocol::types::{
-    BoardCapabilitiesFrame, DecodedFrame, PersistenceMode, ScopeFrame, SCOPE_EDGE_RISING,
-    SCOPE_RUN_CONTINUOUS, SCOPE_RUN_SINGLE, SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
+    BoardCapabilitiesFrame, ChannelViewConfig, DecodedFrame, DisplayMode, MathMode,
+    PersistenceMode, ScopeFrame, SCOPE_EDGE_RISING, SCOPE_RUN_CONTINUOUS, SCOPE_RUN_SINGLE,
+    SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
 };
 use crate::transport::serial::{ConnectionStatus, SerialTransport, TransportSnapshot};
 
@@ -43,6 +46,15 @@ pub fn App() -> impl IntoView {
     let test_gen_code = RwSignal::new(1u8); // 1 kHz test square wave
     let target_fps = RwSignal::new(20u8);
 
+    // Per-channel oscilloscope vertical settings (independent V/div, offset, coupling, invert, probe)
+    let channel_cfgs = RwSignal::new([
+        ChannelViewConfig::default_for_channel(0),
+        ChannelViewConfig::default_for_channel(1),
+        ChannelViewConfig::default_for_channel(2),
+        ChannelViewConfig::default_for_channel(3),
+    ]);
+    let selected_ch = RwSignal::new(0usize);
+
     // View & analysis controls
     let show_fft = RwSignal::new(false);
     let fft_channel = RwSignal::new(0u8);
@@ -53,6 +65,8 @@ pub fn App() -> impl IntoView {
     let pan_norm = RwSignal::new(0.0f64);
     let persistence_mode = RwSignal::new(PersistenceMode::Off);
     let persist_clear_ver = RwSignal::new(0u64);
+    let math_mode = RwSignal::new(MathMode::Off);
+    let display_mode = RwSignal::new(DisplayMode::Yt);
 
     // Telemetry & frames (Arc<ScopeFrame> avoids deep-cloning waveform buffers across UI & persistence)
     let latest_frame = RwSignal::new(None::<Arc<ScopeFrame>>);
@@ -116,7 +130,6 @@ pub fn App() -> impl IntoView {
                     d.feed(bytes, now, |frame| match frame {
                         DecodedFrame::Capabilities(c) => {
                             caps.set(Some(c));
-                            // Push current config and start streaming upon connect
                             send_cfg();
                             send_trig();
                             running.set(true);
@@ -128,7 +141,9 @@ pub fn App() -> impl IntoView {
                                 let dt = now - prev;
                                 if dt > 1.0 {
                                     let inst = 1000.0 / dt;
-                                    fps.update(|f| *f = if *f == 0.0 { inst } else { *f * 0.8 + inst * 0.2 });
+                                    fps.update(|f| {
+                                        *f = if *f == 0.0 { inst } else { *f * 0.8 + inst * 0.2 }
+                                    });
                                 }
                             }
                             last_frame_ts.set_value(now);
@@ -138,7 +153,8 @@ pub fn App() -> impl IntoView {
 
                             // Throttle numeric measurement DOM updates to ~10 Hz (immediate on single-shot / first frame)
                             let prev_m = last_meas_ts.get_value();
-                            if prev_m == 0.0 || !running.get_untracked() || (now - prev_m) >= 100.0 {
+                            if prev_m == 0.0 || !running.get_untracked() || (now - prev_m) >= 100.0
+                            {
                                 last_meas_ts.set_value(now);
                                 meas_frame.set(Some(arc_frame));
                             }
@@ -163,7 +179,11 @@ pub fn App() -> impl IntoView {
     let on_toggle_run = Callback::new(move |_| {
         let next = !running.get_untracked();
         running.set(next);
-        send_run(if next { SCOPE_RUN_CONTINUOUS } else { SCOPE_RUN_STOP });
+        send_run(if next {
+            SCOPE_RUN_CONTINUOUS
+        } else {
+            SCOPE_RUN_STOP
+        });
     });
     let on_single_shot = Callback::new(move |_| {
         running.set(false);
@@ -193,6 +213,52 @@ pub fn App() -> impl IntoView {
         pan_norm.set(0.0);
     });
 
+    let on_toggle_channel = Callback::new(move |ch: u8| {
+        channel_mask.update(|m| {
+            let next = *m ^ (1 << ch);
+            if next & 0x0f != 0 {
+                *m = next & 0x0f;
+            }
+        });
+        persist_clear_ver.update(|v| *v = v.wrapping_add(1));
+        send_cfg();
+    });
+
+    let on_autoset = Callback::new(move |_| {
+        if let Some(frame) = latest_frame.get_untracked() {
+            let (next_cfgs, next_trig_mv) = compute_autoset(
+                &frame,
+                channel_mask.get_untracked(),
+                channel_cfgs.get_untracked(),
+                trig_channel.get_untracked(),
+            );
+            channel_cfgs.set(next_cfgs);
+            trig_level_mv.set(next_trig_mv);
+            zoom.set(1.0);
+            pan_norm.set(0.0);
+            persist_clear_ver.update(|v| *v = v.wrapping_add(1));
+            send_trig();
+        } else {
+            let next_cfgs = compute_stack_configs(
+                channel_mask.get_untracked(),
+                channel_cfgs.get_untracked(),
+                None,
+            );
+            channel_cfgs.set(next_cfgs);
+        }
+    });
+
+    let on_stack = Callback::new(move |_| {
+        let frame_opt = latest_frame.get_untracked();
+        let next_cfgs = compute_stack_configs(
+            channel_mask.get_untracked(),
+            channel_cfgs.get_untracked(),
+            frame_opt.as_deref(),
+        );
+        channel_cfgs.set(next_cfgs);
+        persist_clear_ver.update(|v| *v = v.wrapping_add(1));
+    });
+
     view! {
         <div class="app-shell">
             <TopToolbar
@@ -211,7 +277,6 @@ pub fn App() -> impl IntoView {
 
             <ScopeControlBar
                 rate_code=rate_code
-                channel_mask=channel_mask
                 atten_code=atten_code
                 depth_code=depth_code
                 trig_mode=trig_mode
@@ -223,6 +288,8 @@ pub fn App() -> impl IntoView {
                 show_cursors=show_cursors
                 fft_channel=fft_channel
                 persistence_mode=persistence_mode
+                math_mode=math_mode
+                display_mode=display_mode
                 on_clear_persist=on_clear_persist
                 on_apply_cfg=on_apply_cfg
                 on_apply_trig=on_apply_trig
@@ -234,8 +301,14 @@ pub fn App() -> impl IntoView {
                 <ScopeCanvas
                     latest_frame=latest_frame
                     frame_version=frame_version
+                    channel_mask=channel_mask
+                    channel_cfgs=channel_cfgs
+                    selected_ch=selected_ch
+                    atten_code=atten_code
                     trig_level_mv=trig_level_mv
                     trig_channel=trig_channel
+                    trig_edge=trig_edge
+                    on_apply_trig=on_apply_trig
                     show_fft=show_fft
                     fft_channel=fft_channel
                     show_cursors=show_cursors
@@ -245,11 +318,26 @@ pub fn App() -> impl IntoView {
                     pan_norm=pan_norm
                     persistence_mode=persistence_mode
                     persist_clear_ver=persist_clear_ver
+                    math_mode=math_mode
+                    display_mode=display_mode
                 />
             </main>
 
+            <ChannelStrip
+                channel_mask=channel_mask
+                channel_cfgs=channel_cfgs
+                selected_ch=selected_ch
+                math_mode=math_mode
+                on_toggle_channel=on_toggle_channel
+                on_autoset=on_autoset
+                on_stack=on_stack
+                on_clear_persist=on_clear_persist
+            />
+
             <MeasurementsBar
                 latest_frame=meas_frame
+                channel_cfgs=channel_cfgs
+                selected_ch=selected_ch
                 show_cursors=show_cursors
                 cursor_a_norm=cursor_a_norm
                 cursor_b_norm=cursor_b_norm

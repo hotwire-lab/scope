@@ -2,12 +2,18 @@ use std::sync::Arc;
 
 use leptos::prelude::*;
 
-use crate::dsp::scope_dsp::{format_freq, format_time_us, format_voltage_mv, measure_channel};
-use crate::protocol::types::{ScopeFrame, CHANNEL_COLORS, CHANNEL_NAMES};
+use crate::dsp::scope_dsp::{
+    channel_mean_mv, format_freq, format_time_us, format_voltage_mv, measure_channel,
+};
+use crate::protocol::types::{
+    ChannelCoupling, ChannelViewConfig, ScopeFrame, CHANNEL_COLORS, CHANNEL_NAMES,
+};
 
 #[component]
 pub fn MeasurementsBar(
     latest_frame: RwSignal<Option<Arc<ScopeFrame>>>,
+    channel_cfgs: RwSignal<[ChannelViewConfig; 4]>,
+    selected_ch: RwSignal<usize>,
     show_cursors: RwSignal<bool>,
     cursor_a_norm: RwSignal<f64>,
     cursor_b_norm: RwSignal<f64>,
@@ -30,10 +36,12 @@ pub fn MeasurementsBar(
                 let visible_us = total_us / zoom.get().max(1.0);
                 let us_per_div = visible_us / 10.0;
 
+                let cfgs = channel_cfgs.get();
                 let cards = (0..4usize)
                     .filter(|&ch| !frame.channels_mv[ch].is_empty())
                     .map(|ch| {
                         let m = measure_channel(&frame.channels_mv[ch], frame.sample_rate_hz);
+                        let mult = cfgs[ch].probe_mult();
                         let color = CHANNEL_COLORS[ch];
                         let name = CHANNEL_NAMES[ch];
                         let freq_str = m
@@ -47,13 +55,15 @@ pub fn MeasurementsBar(
 
                         view! {
                             <div class="meas-card" style=format!("border-left: 3px solid {color};")>
-                                <div class="meas-card-title" style=format!("color: {color};")>{name}</div>
+                                <div class="meas-card-title" style=format!("color: {color};")>
+                                    {if cfgs[ch].probe_x10 { format!("{name} (10×)") } else { name.to_string() }}
+                                </div>
                                 <div class="meas-grid">
-                                    <span>"Vpp "<strong>{format_voltage_mv(m.vpp_mv)}</strong></span>
-                                    <span>"Vrms "<strong>{format_voltage_mv(m.vrms_mv)}</strong></span>
-                                    <span>"Vavg "<strong>{format_voltage_mv(m.vavg_mv)}</strong></span>
+                                    <span>"Vpp "<strong>{format_voltage_mv(m.vpp_mv * mult)}</strong></span>
+                                    <span>"Vrms "<strong>{format_voltage_mv(m.vrms_mv * mult)}</strong></span>
+                                    <span>"Vavg "<strong>{format_voltage_mv(m.vavg_mv * mult)}</strong></span>
                                     <span>"Freq "<strong>{freq_str}</strong></span>
-                                    <span>"Min/Max "<strong>{format!("{:.2}/{:.2}V", m.vmin_mv / 1000.0, m.vmax_mv / 1000.0)}</strong></span>
+                                    <span>"Min/Max "<strong>{format!("{:.2}/{:.2}V", (m.vmin_mv * mult) / 1000.0, (m.vmax_mv * mult) / 1000.0)}</strong></span>
                                     <span>"Duty "<strong>{duty_str}</strong></span>
                                 </div>
                             </div>
@@ -72,19 +82,28 @@ pub fn MeasurementsBar(
                     } else {
                         "—".to_string()
                     };
-                    // Sample voltage at cursors A & B on trigger channel (or first active channel)
-                    let ref_ch = if !frame.channels_mv[frame.trig_channel as usize].is_empty() {
-                        frame.trig_channel as usize
+                    // Sample voltage at cursors A & B on selected channel (or first active channel)
+                    let sel = selected_ch.get().min(3);
+                    let ref_ch = if !frame.channels_mv[sel].is_empty() {
+                        sel
                     } else {
                         (0..4).find(|&c| !frame.channels_mv[c].is_empty()).unwrap_or(0)
                     };
                     let samples = &frame.channels_mv[ref_ch];
+                    let ref_cfg = cfgs[ref_ch];
                     let (va_str, vb_str, dv_str) = if !samples.is_empty() {
                         let max_i = samples.len() - 1;
                         let ia = ((start + cursor_a_norm.get() * span).clamp(0.0, 1.0) * max_i as f64).round() as usize;
                         let ib = ((start + cursor_b_norm.get() * span).clamp(0.0, 1.0) * max_i as f64).round() as usize;
-                        let va = samples[ia];
-                        let vb = samples[ib];
+                        let mean = if ref_cfg.coupling == ChannelCoupling::Ac {
+                            channel_mean_mv(samples)
+                        } else {
+                            0.0
+                        };
+                        let sign = if ref_cfg.invert { -1.0 } else { 1.0 };
+                        let scale = sign * ref_cfg.probe_mult();
+                        let va = (samples[ia] - mean) * scale;
+                        let vb = (samples[ib] - mean) * scale;
                         (
                             format_voltage_mv(va),
                             format_voltage_mv(vb),

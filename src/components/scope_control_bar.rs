@@ -7,7 +7,6 @@ use crate::protocol::types::*;
 #[allow(clippy::too_many_arguments)]
 pub fn ScopeControlBar(
     rate_code: RwSignal<u8>,
-    channel_mask: RwSignal<u8>,
     atten_code: RwSignal<u8>,
     depth_code: RwSignal<u8>,
     trig_mode: RwSignal<u8>,
@@ -19,59 +18,16 @@ pub fn ScopeControlBar(
     show_cursors: RwSignal<bool>,
     fft_channel: RwSignal<u8>,
     persistence_mode: RwSignal<PersistenceMode>,
+    math_mode: RwSignal<MathMode>,
+    display_mode: RwSignal<DisplayMode>,
     on_clear_persist: Callback<()>,
     on_apply_cfg: Callback<()>,
     on_apply_trig: Callback<()>,
     on_apply_run: Callback<()>,
     on_reset_view: Callback<()>,
 ) -> impl IntoView {
-    let toggle_channel = move |ch: u8| {
-        channel_mask.update(|m| {
-            let next = *m ^ (1 << ch);
-            if next & 0x0f != 0 {
-                *m = next & 0x0f;
-            }
-        });
-        on_apply_cfg.run(());
-    };
-
     view! {
         <section class="control-bar">
-            <div class="control-group">
-                <span class="group-label">"Channels"</span>
-                <div class="ch-btn-row">
-                    {(0..4u8)
-                        .map(|ch| {
-                            let color = CHANNEL_COLORS[ch as usize];
-                            let label = format!("CH{}", ch + 1);
-                            let pin_title = CHANNEL_NAMES[ch as usize];
-                            view! {
-                                <button
-                                    class=move || {
-                                        if (channel_mask.get() & (1 << ch)) != 0 {
-                                            "ch-pill active"
-                                        } else {
-                                            "ch-pill"
-                                        }
-                                    }
-                                    style=move || {
-                                        if (channel_mask.get() & (1 << ch)) != 0 {
-                                            format!("border-color: {color}; color: {color}; background: color-mix(in srgb, {color} 15%, transparent);")
-                                        } else {
-                                            String::new()
-                                        }
-                                    }
-                                    title=pin_title
-                                    on:click=move |_| toggle_channel(ch)
-                                >
-                                    {label}
-                                </button>
-                            }
-                        })
-                        .collect_view()}
-                </div>
-            </div>
-
             <div class="control-group">
                 <label class="group-label" for="rate-select">"Sample Rate (Total)"</label>
                 <select
@@ -276,6 +232,31 @@ pub fn ScopeControlBar(
                     >
                         "Cursors"
                     </button>
+                    <button
+                        class=move || if display_mode.get() == DisplayMode::Xy { "btn btn-sm btn-accent active" } else { "btn btn-sm btn-secondary" }
+                        on:click=move |_| {
+                            display_mode.update(|m| {
+                                *m = if *m == DisplayMode::Yt { DisplayMode::Xy } else { DisplayMode::Yt };
+                            });
+                            on_clear_persist.run(());
+                        }
+                        title="Toggle Y-T (time domain) vs X-Y (Lissajous CH1 vs CH2)"
+                    >
+                        {move || if display_mode.get() == DisplayMode::Xy { "X-Y" } else { "Y-T" }}
+                    </button>
+                    <select
+                        class="ctrl-select ctrl-select-sm"
+                        title="Math channel (purple trace)"
+                        prop:value=move || math_mode.get().as_code()
+                        on:change=move |ev| {
+                            math_mode.set(MathMode::from_code(&event_target_value(&ev)));
+                            on_clear_persist.run(());
+                        }
+                    >
+                        <option value="off">"Math: Off"</option>
+                        <option value="sub">"Math: CH1−CH2"</option>
+                        <option value="add">"Math: CH1+CH2"</option>
+                    </select>
                     <select
                         class="ctrl-select ctrl-select-sm"
                         title="Waveform Persistence / Afterglow"
