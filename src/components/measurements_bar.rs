@@ -70,14 +70,37 @@ pub fn MeasurementsBar(
                     } else {
                         "—".to_string()
                     };
+                    // Sample voltage at cursors A & B on trigger channel (or first active channel)
+                    let ref_ch = if !frame.channels_mv[frame.trig_channel as usize].is_empty() {
+                        frame.trig_channel as usize
+                    } else {
+                        (0..4).find(|&c| !frame.channels_mv[c].is_empty()).unwrap_or(0)
+                    };
+                    let samples = &frame.channels_mv[ref_ch];
+                    let (va_str, vb_str, dv_str) = if !samples.is_empty() {
+                        let max_i = samples.len() - 1;
+                        let ia = ((start + cursor_a_norm.get() * span).clamp(0.0, 1.0) * max_i as f64).round() as usize;
+                        let ib = ((start + cursor_b_norm.get() * span).clamp(0.0, 1.0) * max_i as f64).round() as usize;
+                        let va = samples[ia];
+                        let vb = samples[ib];
+                        (
+                            format_voltage_mv(va),
+                            format_voltage_mv(vb),
+                            format_voltage_mv((vb - va).abs()),
+                        )
+                    } else {
+                        ("—".to_string(), "—".to_string(), "—".to_string())
+                    };
                     view! {
                         <div class="meas-card meas-card-cursor">
-                            <div class="meas-card-title">"Cursors A / B"</div>
+                            <div class="meas-card-title">{format!("Cursors A / B ({})", CHANNEL_NAMES[ref_ch])}</div>
                             <div class="meas-grid">
                                 <span>"Δt "<strong>{format_time_us(dt_us as f32)}</strong></span>
                                 <span>"1/Δt "<strong>{inv_dt}</strong></span>
-                                <span>"Timebase "<strong>{format!("{}/div", format_time_us(us_per_div as f32))}</strong></span>
-                                <span>"Rate/Ch "<strong>{format_freq(frame.sample_rate_hz as f32)}</strong></span>
+                                <span>"ΔV "<strong>{dv_str}</strong></span>
+                                <span>"VA "<strong>{va_str}</strong></span>
+                                <span>"VB "<strong>{vb_str}</strong></span>
+                                <span>"Div "<strong>{format_time_us(us_per_div as f32)}</strong></span>
                             </div>
                         </div>
                     }

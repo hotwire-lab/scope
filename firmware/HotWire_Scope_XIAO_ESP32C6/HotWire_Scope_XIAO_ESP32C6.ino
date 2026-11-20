@@ -171,9 +171,14 @@ static void build_cali_lut(uint8_t atten_code) {
 
 static void apply_test_generator(uint8_t code) {
   static const uint32_t freqs[5] = { 0, 1000, 5000, 10000, 50000 };
+  static uint8_t s_last_code = 0xFF;
   if (code > 4) code = 0;
-  if (code == 0) {
+  if (code == s_last_code) return;
+  if (s_last_code != 0xFF && s_last_code != 0) {
     ledcDetach(TEST_GEN_PIN);
+  }
+  s_last_code = code;
+  if (code == 0) {
     pinMode(TEST_GEN_PIN, INPUT);
   } else {
     ledcAttach(TEST_GEN_PIN, freqs[code], 8);
@@ -348,13 +353,13 @@ static void scope_capture_task(void* arg) {
               }
             } else {
               post_collected++;
-              if (post_collected >= post_samples) break;
+              if (post_collected >= post_samples + 2) break;
             }
           }
         }
       }
 
-      if (triggered && post_collected >= post_samples) break;
+      if (triggered && post_collected >= post_samples + 2) break;
       if (!triggered && (millis() - acq_start_ms) >= timeout_ms) {
         if (trig_mode == 0 && total_trig_ch >= want_samples) {
           for (uint8_t c = 0; c < 3; ++c) {

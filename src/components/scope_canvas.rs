@@ -59,9 +59,20 @@ pub fn ScopeCanvas(
     let last_mode = StoredValue::new(PersistenceMode::Off);
     let phosphor_canvas = StoredValue::new_local(None::<web_sys::HtmlCanvasElement>);
     let phosphor_key = StoredValue::new(None::<PhosphorKey>);
+    let resize_ver = RwSignal::new(0u64);
+
+    // Trigger canvas redraw when the browser window is resized (important when paused/single-shot)
+    if let Some(win) = web_sys::window() {
+        let cb = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+            resize_ver.update(|v| *v = v.wrapping_add(1));
+        });
+        let _ = win.add_event_listener_with_callback("resize", cb.as_ref().unchecked_ref());
+        cb.forget();
+    }
 
     // Re-render whenever a new frame arrives or any view parameter changes
     Effect::new(move |_| {
+        let _rv = resize_ver.get();
         let ver = frame_version.get();
         let frame_opt = latest_frame.get();
         let trig_mv = trig_level_mv.get();

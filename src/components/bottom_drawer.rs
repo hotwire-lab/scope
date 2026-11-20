@@ -152,7 +152,10 @@ pub fn BottomDrawer(
                                             .map(|i| i.checked())
                                             .unwrap_or(false);
                                         show_custom_bin.set(checked);
-                                        if !checked {
+                                        if checked {
+                                            flash_offset.set("0x10000".to_string());
+                                        } else {
+                                            flash_offset.set("full".to_string());
                                             selected_file.set_value(None);
                                             selected_file_name.set(None);
                                         }
@@ -186,6 +189,9 @@ pub fn BottomDrawer(
                                             <option value="0x10000">"App @ 0x10000"</option>
                                             <option value="0x0">"Merged @ 0x0"</option>
                                         </select>
+                                        {move || selected_file_name.get().map(|name| view! {
+                                            <span class="mono-readout">{name}</span>
+                                        })}
                                     </div>
                                 })
                             } else {
