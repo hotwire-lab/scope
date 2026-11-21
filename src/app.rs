@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use hotwire_core::protocol::{BoardIdentity, ToolId};
-use hotwire_core::ui::HotWireTheme;
+use hotwire_core::protocol::{BoardIdentity, FirmwareMismatch, ToolId};
+use hotwire_core::transport::HandshakeGuard;
+use hotwire_core::ui::{FirmwareMismatchModal, HotWireTheme};
 use leptos::prelude::*;
 
 use crate::components::bottom_drawer::BottomDrawer;
@@ -34,6 +35,9 @@ pub fn App() -> impl IntoView {
     let transport = RwSignal::new(serial_transport.with_value(|t| t.snapshot()));
     let identity = RwSignal::new(None::<BoardIdentity>);
     let caps = RwSignal::new(None::<BoardCapabilitiesFrame>);
+    let mismatch = RwSignal::new(None::<FirmwareMismatch>);
+    let flasher_mismatch = RwSignal::new(None::<FirmwareMismatch>);
+    let handshake_guard = StoredValue::new_local(HandshakeGuard::new(ToolId::Oscilloscope));
 
     // Acquisition & trigger settings
     let running = RwSignal::new(false);
@@ -118,14 +122,31 @@ pub fn App() -> impl IntoView {
         st.init(
             move |snap: TransportSnapshot| {
                 let connected = snap.status.is_active();
+                let is_usb = snap.status.is_usb_connected();
+                let dev_name = snap.device_name.clone();
                 transport.set(snap);
                 if !connected {
+                    handshake_guard.update_value(|g| g.cancel());
                     running.set(false);
                     identity.set(None);
                     caps.set(None);
                     fps.set(0.0);
                     last_frame_ts.set_value(0.0);
                     demuxer.update_value(|d| d.reset());
+                } else if is_usb {
+                    mismatch.set(None);
+                    flasher_mismatch.set(None);
+                    handshake_guard.update_value(|g| {
+                        g.arm_timeout(dev_name, 3500, move |mm| {
+                            mismatch.set(Some(mm.clone()));
+                            flasher_mismatch.set(Some(mm));
+                            serial_transport.with_value(|t| t.disconnect());
+                        });
+                    });
+                } else {
+                    handshake_guard.update_value(|g| g.cancel());
+                    mismatch.set(None);
+                    flasher_mismatch.set(None);
                 }
             },
             move |bytes: &[u8]| {
@@ -133,15 +154,29 @@ pub fn App() -> impl IntoView {
                 demuxer.update_value(|d| {
                     d.feed(bytes, now, |frame| match frame {
                         DecodedFrame::Capabilities(id, c) => {
-                            let is_scope = id.matches_tool(ToolId::Oscilloscope);
+                            let is_usb = transport.get_untracked().status.is_usb_connected();
+                            if is_usb {
+                                let mut verdict = Ok(());
+                                handshake_guard.update_value(|g| {
+                                    verdict = g.verify(&id);
+                                });
+                                if let Err(mm) = verdict {
+                                    mismatch.set(Some(mm.clone()));
+                                    flasher_mismatch.set(Some(mm));
+                                    serial_transport.with_value(|t| t.disconnect());
+                                    return;
+                                }
+                            } else {
+                                handshake_guard.update_value(|g| g.cancel());
+                            }
+                            mismatch.set(None);
+                            flasher_mismatch.set(None);
                             identity.set(Some(id));
                             caps.set(Some(c));
-                            if is_scope {
-                                send_cfg();
-                                send_trig();
-                                running.set(true);
-                                send_run(SCOPE_RUN_CONTINUOUS);
-                            }
+                            send_cfg();
+                            send_trig();
+                            running.set(true);
+                            send_run(SCOPE_RUN_CONTINUOUS);
                         }
                         DecodedFrame::Scope(scope_frame) => {
                             let prev = last_frame_ts.get_value();
@@ -201,6 +236,10 @@ pub fn App() -> impl IntoView {
         drawer_open.update(|v| *v = !*v);
     });
     let on_close_drawer = Callback::new(move |_| drawer_open.set(false));
+    let on_open_flasher_from_mismatch = Callback::new(move |_| {
+        mismatch.set(None);
+        drawer_open.set(true);
+    });
     let on_apply_cfg = Callback::new(move |_| {
         persist_clear_ver.update(|v| *v = v.wrapping_add(1));
         send_cfg();
@@ -358,7 +397,13 @@ pub fn App() -> impl IntoView {
                 open=drawer_open
                 on_close=on_close_drawer
                 identity=identity
+                mismatch=flasher_mismatch
                 serial_transport=serial_transport
+            />
+
+            <FirmwareMismatchModal
+                mismatch=mismatch
+                on_open_flasher=on_open_flasher_from_mismatch
             />
         </div>
     }
