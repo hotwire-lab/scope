@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hotwire-oscilloscope-v8';
+const CACHE_NAME = 'hotwire-oscilloscope-v9';
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (event) => {

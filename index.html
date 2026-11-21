@@ -13,22 +13,59 @@
     <title>HotWire Oscilloscope — 4-Ch 12-bit GDMA ADC Scope &amp; FFT (XIAO ESP32-S3 / C6)</title>
     <meta
       name="description"
-      content="Zero-install browser Digital Storage Oscilloscope &amp; FFT Spectrum Analyzer PWA for Seeed Studio XIAO ESP32-S3 and XIAO ESP32-C6 via Web Serial &amp; WebUSB. Rust/WASM + GDMA continuous ADC."
+      content="Zero-install browser 4-channel Digital Storage Oscilloscope &amp; FFT Spectrum Analyzer PWA for Seeed Studio XIAO ESP32-S3 and XIAO ESP32-C6 via Web Serial &amp; WebUSB. Rust/WASM + GDMA continuous ADC with draggable channels, persistence, Math &amp; X-Y mode."
     />
     <meta
       name="keywords"
-      content="ESP32-S3 oscilloscope, ESP32-C6 oscilloscope, XIAO ESP32-S3 ADC DMA, Web Serial oscilloscope, WebUSB oscilloscope, Rust WebAssembly oscilloscope, FFT analyzer, HotWire Oscilloscope"
+      content="ESP32-S3 oscilloscope, ESP32-C6 oscilloscope, XIAO ESP32-S3 ADC DMA, Web Serial oscilloscope, WebUSB oscilloscope, Rust WebAssembly oscilloscope, FFT analyzer, Lissajous XY mode, digital phosphor persistence, esptool-js flasher, HotWire Oscilloscope"
     />
     <meta name="author" content="Kari Vierimaa, Kempele" />
+    <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://kavierim.github.io/HotWire-Oscilloscope/" />
 
+    <!-- Open Graph / Social Preview -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="HotWire Oscilloscope" />
     <meta property="og:url" content="https://kavierim.github.io/HotWire-Oscilloscope/" />
     <meta property="og:title" content="HotWire Oscilloscope — 4-Ch GDMA ADC Scope &amp; FFT (XIAO ESP32-S3 / C6)" />
     <meta
       property="og:description"
-      content="Real-time 4-channel 12-bit GDMA ADC Digital Storage Oscilloscope with eFuse calibration, edge triggering, A/B cursors, live FFT spectrum, and offline Demo simulator."
+      content="Turn a $5 XIAO ESP32-S3 or C6 into a 4-channel 12-bit GDMA Oscilloscope in your browser: draggable channel offsets, 1-2-5 V/div, DC/AC, AUTO-Set, digital phosphor persistence, Math, X-Y mode, FFT &amp; 1-click Web Flasher."
     />
+    <meta property="og:image" content="https://kavierim.github.io/HotWire-Oscilloscope/og-preview.jpg" />
+    <meta property="og:image:alt" content="HotWire Oscilloscope running dual-channel sine and PWM waveforms with A/B cursors and benchtop channel controls" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="HotWire Oscilloscope — 4-Ch GDMA ADC Scope &amp; FFT (XIAO ESP32-S3 / C6)" />
+    <meta
+      name="twitter:description"
+      content="Zero-install Rust/WASM Digital Storage Oscilloscope PWA for Seeed Studio XIAO ESP32-S3 &amp; C6. Includes 1-click Web Flasher and offline Demo simulator."
+    />
+    <meta name="twitter:image" content="https://kavierim.github.io/HotWire-Oscilloscope/og-preview.jpg" />
+
+    <!-- Structured Data for Search Engines -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "HotWire Oscilloscope",
+        "operatingSystem": "Web, Windows, macOS, Linux, Android",
+        "applicationCategory": "UtilitiesApplication",
+        "url": "https://kavierim.github.io/HotWire-Oscilloscope/",
+        "screenshot": "https://kavierim.github.io/HotWire-Oscilloscope/og-preview.jpg",
+        "description": "Zero-install 4-channel 12-bit GDMA ADC Digital Storage Oscilloscope and FFT Spectrum Analyzer PWA for Seeed Studio XIAO ESP32-S3 and XIAO ESP32-C6 via Web Serial and WebUSB.",
+        "author": {
+          "@type": "Person",
+          "name": "Kari Vierimaa"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
 
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="manifest" href="./manifest.webmanifest" />
@@ -37,6 +74,7 @@
     <link data-trunk rel="copy-dir" href="public/firmware" />
     <link data-trunk rel="copy-file" href="public/icon.svg" />
     <link data-trunk rel="copy-file" href="public/manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="public/og-preview.jpg" />
     <link data-trunk rel="copy-file" href="public/robots.txt" />
     <link data-trunk rel="copy-file" href="public/sitemap.xml" />
     <link data-trunk rel="copy-file" href="public/sw.js" />
