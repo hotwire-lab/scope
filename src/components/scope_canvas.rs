@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use hotwire_core::ui::{
+    apply_anchored_zoom, apply_horizontal_pan, GestureDelta, PinchPanTracker,
+};
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -32,6 +35,7 @@ enum DragTarget {
     CursorA,
     CursorB,
     Pan,
+    Pinch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -100,8 +104,7 @@ pub fn ScopeCanvas(
 ) -> impl IntoView {
     let canvas_ref = NodeRef::<html::Canvas>::new();
     let drag_target = StoredValue::new(DragTarget::None);
-    let drag_start_x = StoredValue::new(0.0f64);
-    let drag_start_pan = StoredValue::new(0.0f64);
+    let gesture_tracker = StoredValue::new(PinchPanTracker::new());
     let drag_hud = RwSignal::new(None::<String>);
 
     // Persistence & zero-allocation rendering state
@@ -738,16 +741,18 @@ pub fn ScopeCanvas(
             return;
         }
 
-        // Otherwise zoom horizontal timebase around center
+        // Otherwise zoom horizontal timebase anchored at cursor X
+        let fft_on = show_fft.get_untracked();
+        let d_mode = display_mode.get_untracked();
+        let (plot_w, _) = calc_plot_geom(rect.width(), rect.height(), fft_on, d_mode);
+        let anchor_norm = ((x - PAD_L) / plot_w).clamp(0.0, 1.0);
         let factor = if ev.delta_y() < 0.0 { 1.25 } else { 0.8 };
         let old_z = zoom.get_untracked().max(1.0);
-        let new_z = (old_z * factor).clamp(1.0, 32.0);
+        let (new_z, new_pan) =
+            apply_anchored_zoom(old_z, pan_norm.get_untracked(), factor, anchor_norm, 1.0, 32.0);
         if (new_z - old_z).abs() > 1e-4 {
-            let old_span = 1.0 / old_z;
-            let new_span = 1.0 / new_z;
-            let center = pan_norm.get_untracked() + old_span * 0.5;
             zoom.set(new_z);
-            pan_norm.set((center - new_span * 0.5).clamp(0.0, (1.0 - new_span).max(0.0)));
+            pan_norm.set(new_pan);
         }
     };
 
@@ -761,6 +766,18 @@ pub fn ScopeCanvas(
         let fft_on = show_fft.get_untracked();
         let d_mode = display_mode.get_untracked();
         let (plot_w, scope_h) = calc_plot_geom(rect.width(), rect.height(), fft_on, d_mode);
+
+        let mut active_ptrs = 0usize;
+        gesture_tracker.update_value(|gt| {
+            gt.pointer_down(ev.pointer_id(), x, y);
+            active_ptrs = gt.active_count();
+        });
+        if active_ptrs >= 2 {
+            let _ = canvas.set_pointer_capture(ev.pointer_id());
+            drag_target.set_value(DragTarget::Pinch);
+            drag_hud.set(None);
+            return;
+        }
 
         if d_mode == DisplayMode::Yt {
             // 1. Check left-margin draggable channel ground markers (1►..4►)
@@ -847,10 +864,9 @@ pub fn ScopeCanvas(
             }
         }
 
-        // 4. Default: Horizontal Pan
+        // 4. Default: Horizontal Pan (and pinch-to-zoom on multi-touch)
         drag_target.set_value(DragTarget::Pan);
-        drag_start_x.set_value(x);
-        drag_start_pan.set_value(pan_norm.get_untracked());
+        let _ = canvas.set_pointer_capture(ev.pointer_id());
     };
 
     let on_pointer_move = move |ev: web_sys::PointerEvent| {
@@ -868,6 +884,11 @@ pub fn ScopeCanvas(
         let d_mode = display_mode.get_untracked();
         let (plot_w, scope_h) = calc_plot_geom(rect.width(), rect.height(), fft_on, d_mode);
         let norm_x = ((x - PAD_L) / plot_w).clamp(0.0, 1.0);
+
+        let mut gesture_delta = None;
+        gesture_tracker.update_value(|gt| {
+            gesture_delta = gt.pointer_move(ev.pointer_id(), x, y);
+        });
 
         match target {
             DragTarget::ChannelPos(ch) => {
@@ -912,18 +933,53 @@ pub fn ScopeCanvas(
             DragTarget::CursorA => cursor_a_norm.set(norm_x),
             DragTarget::CursorB => cursor_b_norm.set(norm_x),
             DragTarget::Pan => {
-                let z = zoom.get_untracked().max(1.0);
-                let span = 1.0 / z;
-                let dx_norm = (x - drag_start_x.get_value()) / plot_w * span;
-                pan_norm
-                    .set((drag_start_pan.get_value() - dx_norm).clamp(0.0, (1.0 - span).max(0.0)));
+                if let Some(GestureDelta::Pan { dx, .. }) = gesture_delta {
+                    let next_pan = apply_horizontal_pan(
+                        zoom.get_untracked().max(1.0),
+                        pan_norm.get_untracked(),
+                        dx,
+                        plot_w,
+                    );
+                    pan_norm.set(next_pan);
+                }
+            }
+            DragTarget::Pinch => {
+                if let Some(GestureDelta::Pinch {
+                    scale_ratio,
+                    center_x,
+                    pan_dx,
+                    ..
+                }) = gesture_delta
+                {
+                    let anchor = ((center_x - PAD_L) / plot_w).clamp(0.0, 1.0);
+                    let (next_z, zoomed_pan) = apply_anchored_zoom(
+                        zoom.get_untracked().max(1.0),
+                        pan_norm.get_untracked(),
+                        scale_ratio,
+                        anchor,
+                        1.0,
+                        32.0,
+                    );
+                    let panned = apply_horizontal_pan(next_z, zoomed_pan, pan_dx, plot_w);
+                    zoom.set(next_z);
+                    pan_norm.set(panned);
+                }
             }
             DragTarget::None => {}
         }
     };
 
-    let on_pointer_up = move |_ev: web_sys::PointerEvent| {
-        if drag_target.get_value() != DragTarget::None {
+    let on_pointer_up = move |ev: web_sys::PointerEvent| {
+        let mut remaining = 0usize;
+        gesture_tracker.update_value(|gt| {
+            gt.pointer_up(ev.pointer_id());
+            remaining = gt.active_count();
+        });
+        if drag_target.get_value() == DragTarget::Pinch && remaining == 1 {
+            drag_target.set_value(DragTarget::Pan);
+            return;
+        }
+        if remaining == 0 && drag_target.get_value() != DragTarget::None {
             drag_target.set_value(DragTarget::None);
             drag_hud.set(None);
         }

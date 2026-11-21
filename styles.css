@@ -1,15 +1,4 @@
-:root {
-  --bg: #0d1117;
-  --surface: #131922;
-  --surface-2: #1a2230;
-  --border: #283244;
-  --text: #e6edf3;
-  --muted: #8b949e;
-  --accent: #38bdf8;
-  --warn: #fbbf24;
-  --danger: #f87171;
-  --ok: #4ade80;
-}
+/* App-specific styles (shared theme, toolbar, buttons, bottom sheet & flasher come from hotwire-core) */
 
 * {
   box-sizing: border-box;
@@ -35,91 +24,6 @@ html, body {
   height: 100dvh;
 }
 
-/* Top toolbar */
-.top-toolbar {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 8px 12px;
-}
-
-.toolbar-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.brand-cluster {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.brand-logo {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: #0a0f17;
-  border: 1px solid var(--border);
-  display: grid;
-  place-items: center;
-}
-
-.brand-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.1;
-}
-
-.brand-title {
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.2px;
-}
-
-.brand-badge {
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  font-size: 12px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-
-.status-connected .status-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-.status-connecting .status-dot { background: var(--warn); }
-
-.status-vidpid {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.control-spacer {
-  flex: 1;
-}
-
-.toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
 .fps-badge {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
@@ -129,30 +33,6 @@ html, body {
   padding: 3px 7px;
   border-radius: 6px;
 }
-
-/* Buttons */
-.btn {
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text);
-  padding: 5px 11px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
-.btn:hover:not(:disabled) { border-color: #4b5d7a; background: #222d40; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-sm { padding: 4px 8px; font-size: 11px; }
-.btn-primary { background: #0284c7; border-color: #0ea5e9; color: #fff; }
-.btn-primary:hover:not(:disabled) { background: #0369a1; }
-.btn-danger { background: #b91c1c; border-color: #ef4444; color: #fff; }
-.btn-danger:hover:not(:disabled) { background: #991b1b; }
-.btn-accent { background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.45); color: #7dd3fc; }
-.btn-accent.active { background: #0284c7; color: #fff; }
-.btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
-.btn-ghost:hover { color: var(--text); background: var(--surface-2); }
 
 /* Control Bar */
 .control-bar {
@@ -447,47 +327,7 @@ html, body {
 .text-warn { color: var(--warn) !important; }
 .text-ok { color: var(--ok) !important; }
 
-/* Bottom Drawer */
-.drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: none;
-  align-items: flex-end;
-  z-index: 50;
-}
-
-.drawer-backdrop.open {
-  display: flex;
-}
-
-.bottom-drawer {
-  width: 100%;
-  max-height: 75vh;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  border-radius: 12px 12px 0 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.drawer-body {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 16px;
-  padding: 14px;
-  overflow-y: auto;
-}
-
+/* Drawer Pinout Column (BottomSheet + FlasherPanel styles come from hotwire-core) */
 .drawer-col {
   display: flex;
   flex-direction: column;
@@ -498,43 +338,6 @@ html, body {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.4;
-}
-
-.form-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.progress-bar {
-  height: 6px;
-  background: var(--surface-2);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.15s;
-}
-
-.flash-error {
-  color: var(--danger);
-  font-size: 12px;
-}
-
-.flash-log {
-  background: #090d14;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px;
-  height: 120px;
-  overflow-y: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: #a5d6ff;
 }
 
 .pin-table {
