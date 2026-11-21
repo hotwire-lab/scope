@@ -134,7 +134,7 @@ pub fn App() -> impl IntoView {
                     mismatch.set(None);
                     flasher_mismatch.set(None);
                     handshake_guard.update_value(|g| {
-                        g.arm_timeout(dev_name, 3500, move |mm| {
+                        g.arm_timeout(dev_name, 5000, move |mm| {
                             mismatch.set(Some(mm.clone()));
                             flasher_mismatch.set(Some(mm));
                             serial_transport.with_value(|t| t.disconnect());
@@ -151,6 +151,7 @@ pub fn App() -> impl IntoView {
                 demuxer.update_value(|d| {
                     d.feed(bytes, now, |frame| match frame {
                         DecodedFrame::Capabilities(id, _c) => {
+                            serial_transport.with_value(|t| t.notify_handshake_ok());
                             let is_usb = transport.get_untracked().status.is_usb_connected();
                             if is_usb {
                                 let mut verdict = Ok(());

@@ -356,3 +356,29 @@ html, body {
   background: var(--surface-2);
   color: var(--muted);
 }
+
+@media (max-width: 720px) {
+  .control-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 5px 8px;
+    gap: 8px;
+    scrollbar-width: none;
+  }
+  .control-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .control-group {
+    flex-shrink: 0;
+  }
+  .scope-main {
+    min-height: 180px;
+  }
+  .channel-strip {
+    padding: 5px 8px;
+    gap: 6px;
+  }
+  .measurements-bar {
+    padding: 5px 8px;
+  }
+}
