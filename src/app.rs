@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use hotwire_core::protocol::{BoardIdentity, ToolId};
+use hotwire_core::ui::HotWireTheme;
 use leptos::prelude::*;
 
 use crate::components::bottom_drawer::BottomDrawer;
@@ -16,7 +18,7 @@ use crate::protocol::types::{
     PersistenceMode, ScopeFrame, SCOPE_EDGE_RISING, SCOPE_RUN_CONTINUOUS, SCOPE_RUN_SINGLE,
     SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
 };
-use crate::transport::serial::{ConnectionStatus, SerialTransport, TransportSnapshot};
+use crate::transport::serial::{create_scope_transport, TransportSnapshot};
 
 fn perf_now() -> f64 {
     web_sys::window()
@@ -27,9 +29,10 @@ fn perf_now() -> f64 {
 
 #[component]
 pub fn App() -> impl IntoView {
-    let serial_transport = StoredValue::new_local(SerialTransport::new());
+    let serial_transport = StoredValue::new_local(create_scope_transport());
 
     let transport = RwSignal::new(serial_transport.with_value(|t| t.snapshot()));
+    let identity = RwSignal::new(None::<BoardIdentity>);
     let caps = RwSignal::new(None::<BoardCapabilitiesFrame>);
 
     // Acquisition & trigger settings
@@ -114,10 +117,11 @@ pub fn App() -> impl IntoView {
     serial_transport.with_value(|st| {
         st.init(
             move |snap: TransportSnapshot| {
-                let connected = snap.status == ConnectionStatus::Connected;
+                let connected = snap.status.is_active();
                 transport.set(snap);
                 if !connected {
                     running.set(false);
+                    identity.set(None);
                     caps.set(None);
                     fps.set(0.0);
                     last_frame_ts.set_value(0.0);
@@ -128,12 +132,16 @@ pub fn App() -> impl IntoView {
                 let now = perf_now();
                 demuxer.update_value(|d| {
                     d.feed(bytes, now, |frame| match frame {
-                        DecodedFrame::Capabilities(c) => {
+                        DecodedFrame::Capabilities(id, c) => {
+                            let is_scope = id.matches_tool(ToolId::Oscilloscope);
+                            identity.set(Some(id));
                             caps.set(Some(c));
-                            send_cfg();
-                            send_trig();
-                            running.set(true);
-                            send_run(SCOPE_RUN_CONTINUOUS);
+                            if is_scope {
+                                send_cfg();
+                                send_trig();
+                                running.set(true);
+                                send_run(SCOPE_RUN_CONTINUOUS);
+                            }
                         }
                         DecodedFrame::Scope(scope_frame) => {
                             let prev = last_frame_ts.get_value();
@@ -260,10 +268,11 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
+        <HotWireTheme />
         <div class="app-shell">
             <TopToolbar
                 transport=transport
-                caps=caps
+                identity=identity
                 running=running
                 fps=fps
                 on_connect=on_connect
@@ -348,7 +357,7 @@ pub fn App() -> impl IntoView {
             <BottomDrawer
                 open=drawer_open
                 on_close=on_close_drawer
-                caps=caps
+                identity=identity
                 serial_transport=serial_transport
             />
         </div>

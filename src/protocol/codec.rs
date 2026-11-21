@@ -1,42 +1,9 @@
-use serde::Deserialize;
+pub use hotwire_core::protocol::{
+    compute_xor_checksum, encode_command_8 as build_command_frame,
+    encode_frame as encode_response_frame,
+};
 
 use crate::protocol::types::*;
-
-pub fn compute_xor_checksum(bytes: &[u8]) -> u8 {
-    let mut xor = 0u8;
-    for &b in bytes {
-        xor ^= b;
-    }
-    xor
-}
-
-pub fn build_command_frame(cmd_id: u8, p1: u8, p2: u8, p3: u8, p4: u8) -> [u8; 8] {
-    let mut frame = [
-        PROTOCOL_SYNC_0,
-        PROTOCOL_SYNC_1,
-        cmd_id,
-        p1,
-        p2,
-        p3,
-        p4,
-        0,
-    ];
-    frame[7] = compute_xor_checksum(&frame[..7]);
-    frame
-}
-
-#[allow(dead_code)]
-pub fn build_ping_status_cmd() -> [u8; 8] {
-    build_command_frame(CMD_PING_STATUS, 0, 0, 0, 0)
-}
-
-pub fn build_get_caps_cmd() -> [u8; 8] {
-    build_command_frame(CMD_GET_CAPS, 0, 0, 0, 0)
-}
-
-pub fn build_bootloader_cmd() -> [u8; 8] {
-    build_command_frame(CMD_BOOTLOADER, 0xb0, 0x07, 0x10, 0xad)
-}
 
 pub fn build_scope_cfg_cmd(
     rate_code: u8,
@@ -93,20 +60,6 @@ pub fn build_scope_run_cmd(
     )
 }
 
-pub fn encode_response_frame(type_id: u8, payload: &[u8]) -> Vec<u8> {
-    let len = payload.len();
-    let mut frame = Vec::with_capacity(6 + len);
-    frame.push(PROTOCOL_SYNC_0);
-    frame.push(PROTOCOL_SYNC_1);
-    frame.push(type_id);
-    frame.push((len & 0xff) as u8);
-    frame.push(((len >> 8) & 0xff) as u8);
-    frame.extend_from_slice(payload);
-    let chk = compute_xor_checksum(&frame);
-    frame.push(chk);
-    frame
-}
-
 pub fn resolve_rate_preset(rate_code: u8) -> ScopeRatePreset {
     SCOPE_RATE_PRESETS
         .iter()
@@ -131,27 +84,12 @@ pub fn resolve_depth_preset(depth_code: u8) -> ScopeDepthPreset {
         .unwrap_or(SCOPE_DEPTH_PRESETS[1])
 }
 
-#[derive(Deserialize)]
-struct RawCapsJson {
-    board: Option<String>,
-    firmware: Option<String>,
-    scope: Option<bool>,
-    max_channels: Option<u8>,
-    max_rate_hz: Option<u32>,
-    adc_bits: Option<u8>,
-}
-
-pub fn decode_board_capabilities_frame(payload: &[u8]) -> Option<BoardCapabilitiesFrame> {
-    let text = std::str::from_utf8(payload).ok()?;
-    let parsed: RawCapsJson = serde_json::from_str(text).ok()?;
-    Some(BoardCapabilitiesFrame {
-        board: parsed.board.unwrap_or_else(|| "XIAO-ESP32-S3".to_string()),
-        firmware: parsed.firmware.unwrap_or_else(|| "unknown".to_string()),
-        scope_capable: parsed.scope.unwrap_or(true),
-        max_channels: parsed.max_channels.unwrap_or(4),
-        max_rate_hz: parsed.max_rate_hz.unwrap_or(83_333),
-        adc_bits: parsed.adc_bits.unwrap_or(12),
-    })
+pub fn decode_board_capabilities_frame(
+    payload: &[u8],
+) -> Option<(BoardIdentity, BoardCapabilitiesFrame)> {
+    let identity = BoardIdentity::decode_capabilities(payload)?;
+    let caps = BoardCapabilitiesFrame::from_identity(&identity);
+    Some((identity, caps))
 }
 
 pub fn decode_scope_frame(payload: &[u8], timestamp_ms: f64) -> Option<ScopeFrame> {

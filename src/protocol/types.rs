@@ -1,14 +1,12 @@
-pub const PROTOCOL_SYNC_0: u8 = 0xaa;
-pub const PROTOCOL_SYNC_1: u8 = 0x55;
+pub use hotwire_core::protocol::{
+    BoardIdentity, CMD_GET_CAPS, CMD_PING_STATUS, PROTOCOL_SYNC_0, PROTOCOL_SYNC_1,
+    TYPE_BOARD_CAPABILITIES,
+};
 
-pub const CMD_PING_STATUS: u8 = 0x01;
-pub const CMD_GET_CAPS: u8 = 0x02;
 pub const CMD_SCOPE_CFG: u8 = 0x40;
 pub const CMD_SCOPE_TRIG: u8 = 0x41;
 pub const CMD_SCOPE_RUN: u8 = 0x42;
-pub const CMD_BOOTLOADER: u8 = 0xf0;
 
-pub const TYPE_BOARD_CAPABILITIES: u8 = 0x83;
 pub const TYPE_SCOPE_FRAME: u8 = 0x86;
 
 /// Header (16 bytes) + up to 4 channels * 4096 samples * 2 bytes = 32784 bytes.
@@ -374,6 +372,19 @@ pub struct BoardCapabilitiesFrame {
     pub adc_bits: u8,
 }
 
+impl BoardCapabilitiesFrame {
+    pub fn from_identity(id: &BoardIdentity) -> Self {
+        Self {
+            board: id.board.clone(),
+            firmware: id.firmware.clone(),
+            scope_capable: id.get_bool("scope").unwrap_or(true),
+            max_channels: id.get_u64("max_channels").unwrap_or(4) as u8,
+            max_rate_hz: id.get_u64("max_rate_hz").unwrap_or(83_333) as u32,
+            adc_bits: id.get_u64("adc_bits").unwrap_or(12) as u8,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeFrame {
     pub sample_rate_hz: u32,
@@ -396,6 +407,6 @@ pub struct ScopeFrame {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodedFrame {
-    Capabilities(BoardCapabilitiesFrame),
+    Capabilities(BoardIdentity, BoardCapabilitiesFrame),
     Scope(ScopeFrame),
 }

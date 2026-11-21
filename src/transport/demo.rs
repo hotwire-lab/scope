@@ -241,3 +241,25 @@ impl DemoSimulator {
         encode_response_frame(TYPE_SCOPE_FRAME, &payload)
     }
 }
+
+impl hotwire_core::transport::DemoBackend for DemoSimulator {
+    fn device_name(&self) -> &str {
+        "XIAO-ESP32-S3 (Demo)"
+    }
+
+    fn vid_pid(&self) -> &str {
+        "DEMO:0001"
+    }
+
+    fn tick_interval_ms(&self) -> Option<i32> {
+        Some(50)
+    }
+
+    fn handle_command(&mut self, bytes: &[u8]) -> Vec<u8> {
+        DemoSimulator::handle_command(self, bytes)
+    }
+
+    fn tick(&mut self) -> Option<Vec<u8>> {
+        self.tick_stream()
+    }
+}
