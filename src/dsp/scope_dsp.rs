@@ -46,6 +46,7 @@ pub fn measure_channel(samples_mv: &[f32], sample_rate_hz: u32) -> ChannelMeasur
     let vpp = (vmax - vmin).max(0.0);
 
     // Estimate frequency & duty cycle via Schmitt-trigger mid-level crossings with hysteresis
+    // in a single O(n) streaming pass with zero heap allocations.
     let (freq_hz, period_us, duty_pct) = if vpp >= 25.0 && samples_mv.len() >= 8 {
         let mid = 0.5 * (vmin + vmax);
         let hyst = (vpp * 0.08).max(8.0);
@@ -53,8 +54,12 @@ pub fn measure_channel(samples_mv: &[f32], sample_rate_hz: u32) -> ChannelMeasur
         let lo_th = mid - hyst;
 
         let mut high = samples_mv[0] >= mid;
-        let mut rising_edges: Vec<f32> = Vec::new();
-        let mut falling_edges: Vec<f32> = Vec::new();
+        let mut first_rise: Option<f32> = None;
+        let mut last_rise: f32 = 0.0;
+        let mut rise_count: usize = 0;
+        let mut open_rise: Option<f32> = None;
+        let mut high_sum = 0.0f32;
+        let mut high_cnt = 0usize;
 
         for i in 1..samples_mv.len() {
             let prev = samples_mv[i - 1];
@@ -63,37 +68,35 @@ pub fn measure_channel(samples_mv: &[f32], sample_rate_hz: u32) -> ChannelMeasur
                 high = true;
                 let denom = (curr - prev).abs().max(1e-6);
                 let frac = ((mid - prev) / denom).clamp(0.0, 1.0);
-                rising_edges.push((i - 1) as f32 + frac);
+                let pos = (i - 1) as f32 + frac;
+                if first_rise.is_none() {
+                    first_rise = Some(pos);
+                }
+                last_rise = pos;
+                rise_count += 1;
+                open_rise = Some(pos);
             } else if high && curr <= lo_th {
                 high = false;
                 let denom = (prev - curr).abs().max(1e-6);
                 let frac = ((prev - mid) / denom).clamp(0.0, 1.0);
-                falling_edges.push((i - 1) as f32 + frac);
+                let pos = (i - 1) as f32 + frac;
+                if let Some(r) = open_rise.take() {
+                    let dt = pos - r;
+                    if dt > 0.0 {
+                        high_sum += dt;
+                        high_cnt += 1;
+                    }
+                }
             }
         }
 
         let sr = sample_rate_hz as f32;
-        if rising_edges.len() >= 2 {
-            let first = rising_edges[0];
-            let last = *rising_edges.last().unwrap();
-            let cycles = (rising_edges.len() - 1) as f32;
-            let avg_period_samples = (last - first) / cycles;
+        if let Some(first) = first_rise.filter(|_| rise_count >= 2) {
+            let cycles = (rise_count - 1) as f32;
+            let avg_period_samples = (last_rise - first) / cycles;
             if avg_period_samples > 1.0 {
                 let freq = sr / avg_period_samples;
                 let period = 1_000_000.0 / freq;
-
-                // Duty cycle from high-time between matched rising and next falling edge
-                let mut high_sum = 0.0f32;
-                let mut high_cnt = 0usize;
-                for &r in &rising_edges {
-                    if let Some(&f) = falling_edges.iter().find(|&&fe| fe > r) {
-                        let dt = f - r;
-                        if dt > 0.0 && dt < avg_period_samples {
-                            high_sum += dt;
-                            high_cnt += 1;
-                        }
-                    }
-                }
                 let duty = if high_cnt > 0 {
                     Some(((high_sum / high_cnt as f32) / avg_period_samples * 100.0).clamp(0.0, 100.0))
                 } else {
@@ -123,11 +126,19 @@ pub fn measure_channel(samples_mv: &[f32], sample_rate_hz: u32) -> ChannelMeasur
     }
 }
 
-/// Compute single-sided magnitude spectrum in dBV (0 dBV = 1 Vrms) using a Hann window.
-/// Returns `(bin_freq_step_hz, magnitudes_dbv)` of length `n_fft / 2`.
-pub fn compute_fft_dbv(samples_mv: &[f32], sample_rate_hz: u32) -> (f32, Vec<f32>) {
+/// Compute single-sided magnitude spectrum in dBV (0 dBV = 1 Vrms) using a Hann window,
+/// reusing caller-provided scratch buffers to avoid per-frame allocations.
+/// Returns `bin_freq_step_hz` and writes `n_fft / 2` magnitudes into `out_dbv`.
+pub fn compute_fft_dbv_into(
+    samples_mv: &[f32],
+    sample_rate_hz: u32,
+    re: &mut Vec<f32>,
+    im: &mut Vec<f32>,
+    out_dbv: &mut Vec<f32>,
+) -> f32 {
+    out_dbv.clear();
     if samples_mv.len() < 32 || sample_rate_hz == 0 {
-        return (0.0, Vec::new());
+        return 0.0;
     }
 
     // Largest power of two <= samples_mv.len(), capped at 4096
@@ -138,27 +149,39 @@ pub fn compute_fft_dbv(samples_mv: &[f32], sample_rate_hz: u32) -> (f32, Vec<f32
 
     // Remove DC mean and apply Hann window (convert mV to V)
     let mean_mv: f32 = samples_mv[..n].iter().sum::<f32>() / (n as f32);
-    let mut re = vec![0.0f32; n];
-    let mut im = vec![0.0f32; n];
+    re.clear();
+    re.resize(n, 0.0);
+    im.clear();
+    im.resize(n, 0.0);
     let denom = (n - 1).max(1) as f32;
     for i in 0..n {
         let w = 0.5 * (1.0 - (2.0 * PI * (i as f32) / denom).cos());
         re[i] = ((samples_mv[i] - mean_mv) * 0.001) * w;
     }
 
-    fft_in_place(&mut re, &mut im);
+    fft_in_place(re, im);
 
     let half = n / 2;
-    let mut mags_dbv = Vec::with_capacity(half);
+    out_dbv.reserve(half);
     // Coherent gain of Hann window is 0.5; single-sided RMS scaling = 2 / (n * 0.5 * sqrt(2))
     let scale = 2.0 / ((n as f32) * 0.5 * std::f32::consts::SQRT_2);
     for i in 0..half {
         let mag = (re[i] * re[i] + im[i] * im[i]).sqrt() * scale;
         let dbv = 20.0 * mag.max(1e-6).log10();
-        mags_dbv.push(dbv.clamp(-100.0, 20.0));
+        out_dbv.push(dbv.clamp(-100.0, 20.0));
     }
 
-    let bin_hz = (sample_rate_hz as f32) / (n as f32);
+    (sample_rate_hz as f32) / (n as f32)
+}
+
+/// Compute single-sided magnitude spectrum in dBV (0 dBV = 1 Vrms) using a Hann window.
+/// Returns `(bin_freq_step_hz, magnitudes_dbv)` of length `n_fft / 2`.
+#[allow(dead_code)]
+pub fn compute_fft_dbv(samples_mv: &[f32], sample_rate_hz: u32) -> (f32, Vec<f32>) {
+    let mut re = Vec::new();
+    let mut im = Vec::new();
+    let mut mags_dbv = Vec::new();
+    let bin_hz = compute_fft_dbv_into(samples_mv, sample_rate_hz, &mut re, &mut im, &mut mags_dbv);
     (bin_hz, mags_dbv)
 }
 

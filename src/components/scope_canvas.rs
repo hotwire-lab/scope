@@ -9,8 +9,8 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::dsp::scope_dsp::{
-    channel_mean_mv, compute_fft_dbv, compute_math_samples, divs_to_y, format_freq, format_time_us,
-    format_voltage_mv, sample_mv_to_divs, trig_mv_to_y, y_to_divs, y_to_trig_mv,
+    channel_mean_mv, compute_fft_dbv_into, compute_math_samples, divs_to_y, format_freq,
+    format_time_us, format_voltage_mv, sample_mv_to_divs, trig_mv_to_y, y_to_divs, y_to_trig_mv,
 };
 use crate::protocol::codec::resolve_atten_preset;
 use crate::protocol::types::{
@@ -25,6 +25,12 @@ struct ScratchSpline {
     secants: Vec<f64>,
     tangents: Vec<f64>,
     math_mv: Vec<f32>,
+    fft_re: Vec<f32>,
+    fft_im: Vec<f32>,
+    fft_mags: Vec<f32>,
+    fft_bin_hz: f32,
+    fft_cache_ver: u64,
+    fft_cache_ch: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,6 +300,7 @@ pub fn ScopeCanvas(
                                 draw_scope_trace(
                                     &ctx,
                                     old_frame,
+                                    None,
                                     &cfgs,
                                     m_mode,
                                     d_mode,
@@ -346,6 +353,7 @@ pub fn ScopeCanvas(
                                     draw_scope_trace(
                                         &p_ctx,
                                         frame,
+                                        Some(&cur_means),
                                         &cfgs,
                                         m_mode,
                                         d_mode,
@@ -379,6 +387,7 @@ pub fn ScopeCanvas(
                 draw_scope_trace(
                     &ctx,
                     frame,
+                    Some(&cur_means),
                     &cfgs,
                     m_mode,
                     d_mode,
@@ -398,6 +407,7 @@ pub fn ScopeCanvas(
                 draw_scope_trace(
                     &ctx,
                     frame,
+                    Some(&cur_means),
                     &cfgs,
                     m_mode,
                     d_mode,
@@ -545,7 +555,7 @@ pub fn ScopeCanvas(
                     }
                 }
 
-                // Optional FFT Lower Pane
+                // Optional FFT Lower Pane (cached per frame_version + channel)
                 if fft_on {
                     let fft_top = PAD_T + scope_h + 30.0;
                     let fft_h = (css_h - fft_top - 22.0).max(60.0);
@@ -554,17 +564,22 @@ pub fn ScopeCanvas(
                     } else {
                         (0..4).find(|&c| !frame.channels_mv[c].is_empty()).unwrap_or(0)
                     };
-                    draw_fft_pane(
-                        &ctx,
-                        PAD_L,
-                        fft_top,
-                        plot_w,
-                        fft_h,
-                        &frame.channels_mv[chosen],
-                        frame.sample_rate_hz,
-                        CHANNEL_COLORS[chosen],
-                        CHANNEL_NAMES[chosen],
-                    );
+                    scratch.update_value(|sc| {
+                        draw_fft_pane(
+                            &ctx,
+                            PAD_L,
+                            fft_top,
+                            plot_w,
+                            fft_h,
+                            &frame.channels_mv[chosen],
+                            frame.sample_rate_hz,
+                            ver,
+                            chosen,
+                            sc,
+                            CHANNEL_COLORS[chosen],
+                            CHANNEL_NAMES[chosen],
+                        );
+                    });
                 }
             } else {
                 // X-Y Mode HUD
@@ -1042,6 +1057,7 @@ fn ensure_phosphor_canvas(
 fn draw_scope_trace(
     ctx: &web_sys::CanvasRenderingContext2d,
     frame: &ScopeFrame,
+    precomputed_means: Option<&[f32; 4]>,
     cfgs: &[ChannelViewConfig; 4],
     math_mode: MathMode,
     display_mode: DisplayMode,
@@ -1100,7 +1116,9 @@ fn draw_scope_trace(
         }
         let cfg = cfgs[ch];
         let dc_mean = if cfg.coupling == ChannelCoupling::Ac {
-            channel_mean_mv(samples)
+            precomputed_means
+                .map(|m| m[ch])
+                .unwrap_or_else(|| channel_mean_mv(samples))
         } else {
             0.0
         };
@@ -1561,6 +1579,9 @@ fn draw_fft_pane(
     h: f64,
     samples_mv: &[f32],
     sample_rate_hz: u32,
+    frame_ver: u64,
+    fft_ch: usize,
+    sc: &mut ScratchSpline,
     color: &str,
     ch_name: &str,
 ) {
@@ -1570,7 +1591,20 @@ fn draw_fft_pane(
     ctx.set_line_width(1.0);
     ctx.stroke_rect(x0, y0, w, h);
 
-    let (bin_hz, mags) = compute_fft_dbv(samples_mv, sample_rate_hz);
+    if sc.fft_cache_ver != frame_ver || sc.fft_cache_ch != fft_ch || sc.fft_mags.is_empty() {
+        sc.fft_bin_hz = compute_fft_dbv_into(
+            samples_mv,
+            sample_rate_hz,
+            &mut sc.fft_re,
+            &mut sc.fft_im,
+            &mut sc.fft_mags,
+        );
+        sc.fft_cache_ver = frame_ver;
+        sc.fft_cache_ch = fft_ch;
+    }
+
+    let bin_hz = sc.fft_bin_hz;
+    let mags = &sc.fft_mags;
     if mags.len() < 4 {
         return;
     }

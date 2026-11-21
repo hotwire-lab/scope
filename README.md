@@ -16,7 +16,8 @@ Turn a **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into a real-time **4-
 
 1. Plug your **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into USB.
 2. Open **[https://kavierim.github.io/HotWire-Oscilloscope/](https://kavierim.github.io/HotWire-Oscilloscope/)** in **Chrome**, **Edge**, or **Opera** (Desktop or Android).
-3. Click **⚡ Flasher** (top right), select your board (`XIAO ESP32-S3` or `XIAO ESP32-C6`), and click **Flash Firmware** to program the bundled firmware directly from your browser via **`esptool-js`**.
+3. Click **⚡ Flasher** (top right), select your board (`XIAO ESP32-S3` or `XIAO ESP32-C6`), and click **Flash Firmware** to program the bundled firmware (`v1.0.0+`) directly from your browser via **`esptool-js`**.
+   * If a board running another HotWire firmware (e.g., Logic Analyzer or SDR) or an outdated version is connected, the app automatically disconnects and shows a one-click **Flash Firmware** prompt.
 4. Connect a jumper wire from **`D6`** (built-in test generator) to **`D0`**, set **Test Gen (`D6`)** to `1 kHz` / `5 kHz` / `10 kHz` / `50 kHz`, and click **AUTO**!
 
 ## Supported Boards
@@ -28,8 +29,10 @@ Turn a **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into a real-time **4-
 
 ## Benchtop Oscilloscope Features
 
+- **Unified HotWire Shell (`hotwire-core`):**
+  - Top toolbar with instant **Logic / Scope / SDR / Serial** tool switcher, automatic `0x83` target software & version verification (`v1.0.0+`), swipeable mobile **BottomSheet** Web Flasher, and Web Serial (Desktop) / WebUSB (Android) auto-reconnect.
 - **Authentic 10×8 Graticule & Digital Phosphor:**
-  - 10×8 division grid with 5-subdivision center crosshair ticks, two-pass phosphor glow, and smooth monotone cubic Hermite spline interpolation when zoomed in (`>= 4 px/sample`) with sample dots (`>= 10 px/sample`).
+  - 10×8 division grid with 5-subdivision center crosshair ticks, two-pass phosphor glow, smooth monotone cubic Hermite spline interpolation when zoomed in (`>= 4 px/sample`) with sample dots (`>= 10 px/sample`), cursor-anchored mouse wheel zoom, and two-finger touch pinch-to-zoom / pan (`PinchPanTracker`).
 - **Independent Per-Channel Vertical Controls (`ChannelStrip`):**
   - **Draggable Ground Markers (`1►`–`4►`):** Drag any channel's left-margin tag vertically (`−4.0` to `+4.0 div`) to position traces anywhere on screen; double-click to center (`0.0 div`); scroll mouse wheel in the left margin to step `V/div`.
   - **1-2-5 `V/div` Scaling:** `20 mV/div` up to `5 V/div` (or `200 mV/div` to `50 V/div` with `10×` probe).
@@ -41,10 +44,10 @@ Turn a **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into a real-time **4-
 - **Persistence / Afterglow (`Persist`):**
   - Decaying afterglow (`0.5 s`, `2 s`, `5 s`) and **Infinite (`∞`)** offscreen phosphor accumulation + `Clear` button to catch glitches, jitter, and signal envelopes.
 - **Analysis & Measurements:**
-  - **Live Radix-2 FFT Spectrum:** Hann-windowed `dBV` spectrum pane with automatic peak frequency & amplitude readout.
+  - **Live Radix-2 FFT Spectrum:** Cached Hann-windowed `dBV` spectrum pane with automatic peak frequency & amplitude readout.
   - **Math Channel (`CH1 − CH2`, `CH1 + CH2`)** and **`Y-T` / `X-Y` (Lissajous)** display mode.
   - **Draggable `A` / `B` Cursors:** Displays `Δt`, `1/Δt`, `VA`, `VB`, and `ΔV` with live intersection dots on the waveform.
-  - **Automated Measurements:** `Vpp`, `Vrms`, `Vavg`, `Min/Max`, `Freq`, and `Duty %` per channel.
+  - **Automated Measurements:** Zero-allocation streaming `Vpp`, `Vrms`, `Vavg`, `Min/Max`, `Freq`, and `Duty %` per channel.
 
 ## High-Speed ADC & Capture Architecture
 
@@ -71,6 +74,7 @@ Turn a **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into a real-time **4-
 
 ## HotWire Ecosystem
 
+- **[`hotwire-core`](https://github.com/kavierim/hotwire-core)** — Shared Rust/WASM hardware transport, framing, firmware verification, Web Flasher & UI shell
 - **[HotWire Oscilloscope](https://github.com/kavierim/HotWire-Oscilloscope)** ([Live App](https://kavierim.github.io/HotWire-Oscilloscope/)) — 4-Channel 12-bit GDMA ADC Oscilloscope & FFT Spectrum Analyzer
 - **[HotWire Logic Analyzer](https://github.com/kavierim/HotWire-Logic-Analyzer)** ([Live App](https://kavierim.github.io/HotWire-Logic-Analyzer/)) — 8-Channel Logic Analyzer & Tri-State Force I/O with UART/SPI/I²C decoders
 - **[HotWire SDR](https://github.com/kavierim/HotWire-SDR)** ([Live App](https://kavierim.github.io/HotWire-SDR/)) — 1.84–2.79 GHz RF Spectrum Analyzer, Wideband Scanner & Waterfall
@@ -78,7 +82,7 @@ Turn a **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into a real-time **4-
 
 ## Development & Firmware
 
-Built with **Rust + WebAssembly** ([Leptos](https://leptos.dev/) CSR + [Trunk](https://trunkrs.dev/)).
+Built with **Rust + WebAssembly** ([Leptos](https://leptos.dev/) CSR + [Trunk](https://trunkrs.dev/) + `hotwire-core`).
 
 ```bash
 rustup target add wasm32-unknown-unknown

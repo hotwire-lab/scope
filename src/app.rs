@@ -15,9 +15,8 @@ use crate::dsp::scope_dsp::{compute_autoset, compute_stack_configs};
 use crate::protocol::codec::{build_scope_cfg_cmd, build_scope_run_cmd, build_scope_trig_cmd};
 use crate::protocol::demuxer::ProtocolDemuxer;
 use crate::protocol::types::{
-    BoardCapabilitiesFrame, ChannelViewConfig, DecodedFrame, DisplayMode, MathMode,
-    PersistenceMode, ScopeFrame, SCOPE_EDGE_RISING, SCOPE_RUN_CONTINUOUS, SCOPE_RUN_SINGLE,
-    SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
+    ChannelViewConfig, DecodedFrame, DisplayMode, MathMode, PersistenceMode, ScopeFrame,
+    SCOPE_EDGE_RISING, SCOPE_RUN_CONTINUOUS, SCOPE_RUN_SINGLE, SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
 };
 use crate::transport::serial::{create_scope_transport, TransportSnapshot};
 
@@ -34,7 +33,6 @@ pub fn App() -> impl IntoView {
 
     let transport = RwSignal::new(serial_transport.with_value(|t| t.snapshot()));
     let identity = RwSignal::new(None::<BoardIdentity>);
-    let caps = RwSignal::new(None::<BoardCapabilitiesFrame>);
     let mismatch = RwSignal::new(None::<FirmwareMismatch>);
     let flasher_mismatch = RwSignal::new(None::<FirmwareMismatch>);
     let handshake_guard = StoredValue::new_local(HandshakeGuard::new(ToolId::Oscilloscope));
@@ -129,7 +127,6 @@ pub fn App() -> impl IntoView {
                     handshake_guard.update_value(|g| g.cancel());
                     running.set(false);
                     identity.set(None);
-                    caps.set(None);
                     fps.set(0.0);
                     last_frame_ts.set_value(0.0);
                     demuxer.update_value(|d| d.reset());
@@ -153,7 +150,7 @@ pub fn App() -> impl IntoView {
                 let now = perf_now();
                 demuxer.update_value(|d| {
                     d.feed(bytes, now, |frame| match frame {
-                        DecodedFrame::Capabilities(id, c) => {
+                        DecodedFrame::Capabilities(id, _c) => {
                             let is_usb = transport.get_untracked().status.is_usb_connected();
                             if is_usb {
                                 let mut verdict = Ok(());
@@ -172,7 +169,6 @@ pub fn App() -> impl IntoView {
                             mismatch.set(None);
                             flasher_mismatch.set(None);
                             identity.set(Some(id));
-                            caps.set(Some(c));
                             send_cfg();
                             send_trig();
                             running.set(true);
