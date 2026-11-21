@@ -33,29 +33,31 @@ pub fn TopToolbar(
             on_toggle_flasher=on_toggle_drawer
         >
             {move || {
-                if is_active() {
-                    Some(view! {
+                is_active().then(|| {
+                    view! {
                         <span class="fps-badge">
                             {move || format!("{:.1} FPS", fps.get())}
                         </span>
-                        <button
-                            class=move || if running.get() { "btn btn-danger" } else { "btn btn-primary" }
-                            on:click=move |_| on_toggle_run.run(())
-                        >
-                            {move || if running.get() { "■ Stop" } else { "▶ Run" }}
-                        </button>
-                        <button
-                            class="btn btn-secondary"
-                            on:click=move |_| on_single_shot.run(())
-                            title="Capture single triggered frame"
-                        >
-                            "Single"
-                        </button>
-                    })
-                } else {
-                    None
-                }
+                    }
+                })
             }}
+            <button
+                type="button"
+                class=move || if running.get() { "btn btn-danger" } else { "btn btn-primary" }
+                disabled=move || !is_active()
+                on:click=move |_| on_toggle_run.run(())
+            >
+                {move || if running.get() { "■ Stop" } else { "▶ Run" }}
+            </button>
+            <button
+                type="button"
+                class="btn btn-secondary"
+                disabled=move || !is_active()
+                on:click=move |_| on_single_shot.run(())
+                title="Capture single triggered frame"
+            >
+                "Single"
+            </button>
         </HotWireToolbar>
     }
 }
