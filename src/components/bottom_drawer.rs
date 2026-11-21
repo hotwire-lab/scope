@@ -132,7 +132,7 @@ pub fn BottomDrawer(
 
                 <div class="drawer-body">
                     <div class="drawer-col">
-                        <h4>"Web Flasher (esptool-js)"</h4>
+                        <h4>"Web Flasher"</h4>
                         <div class="form-row">
                             <label for="board-select">"Target Board:"</label>
                             <select
