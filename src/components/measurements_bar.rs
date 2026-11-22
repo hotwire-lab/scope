@@ -10,7 +10,9 @@ use crate::protocol::types::{
 };
 
 #[component]
+#[allow(clippy::too_many_arguments)]
 pub fn MeasurementsBar(
+    meas_open: RwSignal<bool>,
     latest_frame: RwSignal<Option<Arc<ScopeFrame>>>,
     channel_cfgs: RwSignal<[ChannelViewConfig; 4]>,
     selected_ch: RwSignal<usize>,
@@ -21,7 +23,13 @@ pub fn MeasurementsBar(
     pan_norm: RwSignal<f64>,
 ) -> impl IntoView {
     view! {
-        <section class="measurements-bar">
+        <section class=move || {
+            if meas_open.get() {
+                "measurements-bar mobile-open"
+            } else {
+                "measurements-bar"
+            }
+        }>
             {move || {
                 let Some(frame) = latest_frame.get() else {
                     return view! {

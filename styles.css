@@ -25,10 +25,6 @@ html, body {
   height: 100dvh;
 }
 
-.mobile-only-btn {
-  display: none;
-}
-
 .fps-badge {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -490,23 +486,20 @@ html, body {
   }
 }
 
-/* Mobile Portrait (360–430px) & Compact Viewports */
-@media (max-width: 720px), (max-height: 500px) {
-  .mobile-only-btn {
-    display: inline-flex;
-  }
-
-  .control-bar.mobile-collapsed {
-    display: none;
-  }
-
+/* Mobile Portrait (360–430px) & Compact Viewports (<= 720px) */
+@media (max-width: 720px) {
   .control-bar {
+    display: none;
     flex-wrap: nowrap;
     overflow-x: auto;
     padding: 5px max(8px, env(safe-area-inset-right)) 5px max(8px, env(safe-area-inset-left));
     gap: 8px;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .control-bar.mobile-open {
+    display: flex;
   }
 
   .control-bar::-webkit-scrollbar {
@@ -528,14 +521,19 @@ html, body {
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
-    padding: 5px max(8px, env(safe-area-inset-right)) 5px max(8px, env(safe-area-inset-left));
+    padding: 5px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
     gap: 8px;
+  }
+
+  .channel-strip.meas-open {
+    padding-bottom: 5px;
   }
 
   .channel-strip::-webkit-scrollbar {
     display: none;
   }
 
+  .channel-strip > *,
   .ch-badges-row,
   .ch-editor-row {
     flex-wrap: nowrap;
@@ -548,7 +546,12 @@ html, body {
   }
 
   .measurements-bar {
+    display: none;
     padding: 5px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+
+  .measurements-bar.mobile-open {
+    display: block;
   }
 
   .meas-card {
@@ -612,6 +615,12 @@ html, body {
 
   .measurements-bar {
     padding-top: 4px;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 720px) and (max-height: 500px) and (orientation: landscape) {
+  .channel-strip:not(.meas-open) {
     padding-bottom: max(4px, env(safe-area-inset-bottom));
   }
 }

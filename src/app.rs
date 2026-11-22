@@ -79,7 +79,19 @@ pub fn App() -> impl IntoView {
     let frame_version = RwSignal::new(0u64);
     let fps = RwSignal::new(0.0f64);
     let drawer_open = RwSignal::new(false);
-    let controls_open = RwSignal::new(true);
+    let controls_open = RwSignal::new(false);
+    let meas_open = RwSignal::new(false);
+
+    // Notify ScopeCanvas immediately when collapsible mobile bars toggle (even while paused)
+    Effect::new(move |_| {
+        let _controls = controls_open.get();
+        let _meas = meas_open.get();
+        if let Some(win) = web_sys::window() {
+            if let Ok(ev) = web_sys::Event::new("resize") {
+                let _ = win.dispatch_event(&ev);
+            }
+        }
+    });
 
     let last_frame_ts = StoredValue::new(0.0f64);
     let last_meas_ts = StoredValue::new(0.0f64);
@@ -377,6 +389,7 @@ pub fn App() -> impl IntoView {
                 channel_cfgs=channel_cfgs
                 selected_ch=selected_ch
                 math_mode=math_mode
+                meas_open=meas_open
                 on_toggle_channel=on_toggle_channel
                 on_autoset=on_autoset
                 on_stack=on_stack
@@ -384,6 +397,7 @@ pub fn App() -> impl IntoView {
             />
 
             <MeasurementsBar
+                meas_open=meas_open
                 latest_frame=meas_frame
                 channel_cfgs=channel_cfgs
                 selected_ch=selected_ch

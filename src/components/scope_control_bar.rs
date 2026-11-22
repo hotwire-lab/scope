@@ -27,21 +27,12 @@ pub fn ScopeControlBar(
     on_apply_run: Callback<()>,
     on_reset_view: Callback<()>,
 ) -> impl IntoView {
-    Effect::new(move |_| {
-        let _open = controls_open.get();
-        if let Some(win) = web_sys::window() {
-            if let Ok(ev) = web_sys::Event::new("resize") {
-                let _ = win.dispatch_event(&ev);
-            }
-        }
-    });
-
     view! {
         <section class=move || {
             if controls_open.get() {
-                "control-bar"
+                "control-bar mobile-open"
             } else {
-                "control-bar mobile-collapsed"
+                "control-bar"
             }
         }>
             <div class="control-group">

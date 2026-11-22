@@ -11,6 +11,7 @@ pub fn ChannelStrip(
     channel_cfgs: RwSignal<[ChannelViewConfig; 4]>,
     selected_ch: RwSignal<usize>,
     math_mode: RwSignal<MathMode>,
+    meas_open: RwSignal<bool>,
     on_toggle_channel: Callback<u8>,
     on_autoset: Callback<()>,
     on_stack: Callback<()>,
@@ -68,7 +69,31 @@ pub fn ChannelStrip(
     };
 
     view! {
-        <section class="channel-strip" aria-label="Oscilloscope Channel Controls">
+        <section
+            class=move || {
+                if meas_open.get() {
+                    "channel-strip meas-open"
+                } else {
+                    "channel-strip"
+                }
+            }
+            aria-label="Oscilloscope Channel Controls"
+        >
+            <button
+                type="button"
+                class=move || {
+                    if meas_open.get() {
+                        "btn btn-xs btn-accent active hw-mobile-only"
+                    } else {
+                        "btn btn-xs btn-secondary hw-mobile-only"
+                    }
+                }
+                aria-expanded=move || meas_open.get().to_string()
+                on:click=move |_| meas_open.update(|v| *v = !*v)
+                title="Show or hide live measurements bar"
+            >
+                {move || if meas_open.get() { "Meas ▴" } else { "Meas ▾" }}
+            </button>
             <div class="ch-badges-row">
                 {(0..4usize)
                     .map(|ch| {

@@ -36,7 +36,7 @@ pub fn TopToolbar(
             {move || {
                 is_active().then(|| {
                     view! {
-                        <span class="fps-badge">
+                        <span class="fps-badge hw-desktop-only">
                             {move || format!("{:.1} FPS", fps.get())}
                         </span>
                     }
@@ -52,7 +52,7 @@ pub fn TopToolbar(
             </button>
             <button
                 type="button"
-                class="btn btn-secondary"
+                class="btn btn-secondary hw-desktop-only"
                 disabled=move || !is_active()
                 on:click=move |_| on_single_shot.run(())
                 title="Capture single triggered frame"
@@ -63,9 +63,9 @@ pub fn TopToolbar(
                 type="button"
                 class=move || {
                     if controls_open.get() {
-                        "btn btn-secondary mobile-only-btn"
+                        "btn btn-accent active hw-mobile-only"
                     } else {
-                        "btn btn-accent mobile-only-btn"
+                        "btn btn-secondary hw-mobile-only"
                     }
                 }
                 aria-expanded=move || controls_open.get().to_string()
