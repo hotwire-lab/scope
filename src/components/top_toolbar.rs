@@ -17,6 +17,7 @@ pub fn TopToolbar(
     on_single_shot: Callback<()>,
     drawer_open: RwSignal<bool>,
     on_toggle_drawer: Callback<()>,
+    controls_open: RwSignal<bool>,
 ) -> impl IntoView {
     let is_active = move || transport.get().status.is_active();
 
@@ -57,6 +58,21 @@ pub fn TopToolbar(
                 title="Capture single triggered frame"
             >
                 "Single"
+            </button>
+            <button
+                type="button"
+                class=move || {
+                    if controls_open.get() {
+                        "btn btn-secondary mobile-only-btn"
+                    } else {
+                        "btn btn-accent mobile-only-btn"
+                    }
+                }
+                aria-expanded=move || controls_open.get().to_string()
+                on:click=move |_| controls_open.update(|v| *v = !*v)
+                title="Show or hide acquisition & trigger controls"
+            >
+                {move || if controls_open.get() { "Controls ▴" } else { "Controls ▾" }}
             </button>
         </HotWireToolbar>
     }

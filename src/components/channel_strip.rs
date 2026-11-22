@@ -90,7 +90,7 @@ pub fn ChannelStrip(
                                     if active && sel {
                                         format!("border-color: {color}; box-shadow: 0 0 0 1px {color}, 0 0 12px color-mix(in srgb, {color} 28%, transparent);")
                                     } else if active {
-                                        format!("border-color: color-mix(in srgb, {color} 55%, #283244);")
+                                        format!("border-color: color-mix(in srgb, {color} 55%, var(--border-strong));")
                                     } else {
                                         String::new()
                                     }
@@ -111,7 +111,7 @@ pub fn ChannelStrip(
                                         if (channel_mask.get() & (1 << ch)) != 0 {
                                             format!("background: {color}; box-shadow: 0 0 6px {color};")
                                         } else {
-                                            "background: #334155;".to_string()
+                                            "background: var(--border-strong);".to_string()
                                         }
                                     }
                                     title="Toggle channel On/Off"

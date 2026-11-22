@@ -6,6 +6,7 @@ use crate::protocol::types::*;
 #[component]
 #[allow(clippy::too_many_arguments)]
 pub fn ScopeControlBar(
+    controls_open: RwSignal<bool>,
     rate_code: RwSignal<u8>,
     atten_code: RwSignal<u8>,
     depth_code: RwSignal<u8>,
@@ -26,8 +27,23 @@ pub fn ScopeControlBar(
     on_apply_run: Callback<()>,
     on_reset_view: Callback<()>,
 ) -> impl IntoView {
+    Effect::new(move |_| {
+        let _open = controls_open.get();
+        if let Some(win) = web_sys::window() {
+            if let Ok(ev) = web_sys::Event::new("resize") {
+                let _ = win.dispatch_event(&ev);
+            }
+        }
+    });
+
     view! {
-        <section class="control-bar">
+        <section class=move || {
+            if controls_open.get() {
+                "control-bar"
+            } else {
+                "control-bar mobile-collapsed"
+            }
+        }>
             <div class="control-group">
                 <label class="group-label" for="rate-select">"Sample Rate (Total)"</label>
                 <select

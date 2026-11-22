@@ -11,10 +11,11 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
   font-size: 13px;
   overflow: hidden;
   user-select: none;
+  -webkit-font-smoothing: antialiased;
 }
 
 .app-shell {
@@ -24,14 +25,21 @@ html, body {
   height: 100dvh;
 }
 
+.mobile-only-btn {
+  display: none;
+}
+
 .fps-badge {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
+  font-weight: 500;
   color: var(--accent);
-  background: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: var(--accent-dim);
+  border: 1px solid rgba(240, 180, 41, 0.35);
   padding: 3px 7px;
-  border-radius: 6px;
+  border-radius: 3px;
+  white-space: nowrap;
 }
 
 /* Control Bar */
@@ -40,8 +48,8 @@ html, body {
   align-items: flex-end;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 7px 12px;
-  background: #101620;
+  padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+  background: #0e1217;
   border-bottom: 1px solid var(--border);
 }
 
@@ -52,17 +60,21 @@ html, body {
 }
 
 .group-label {
+  font-family: var(--font-sans);
   font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.04em;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .control-divider {
   width: 1px;
-  height: 30px;
+  height: 28px;
   background: var(--border);
   align-self: center;
+  flex-shrink: 0;
 }
 
 .ch-btn-row, .inline-controls {
@@ -73,22 +85,33 @@ html, body {
 
 .ch-pill {
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--muted);
+  font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .ctrl-select {
   background: var(--surface-2);
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
   padding: 4px 7px;
+  font-family: var(--font-sans);
   font-size: 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: border-color 0.12s;
+}
+
+.ctrl-select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .ctrl-select-sm {
@@ -98,23 +121,44 @@ html, body {
 
 .trig-slider {
   width: 84px;
-  accent-color: #f97316;
+  height: 24px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.trig-slider::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.trig-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: none;
+  cursor: pointer;
 }
 
 .mono-readout {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
-  min-width: 40px;
-  color: #f97316;
+  font-weight: 500;
+  min-width: 42px;
+  color: var(--accent);
+  white-space: nowrap;
 }
 
 /* Main Scope Canvas */
 .scope-main {
-  flex: 1;
-  min-height: 240px;
+  flex: 1 1 auto;
+  min-height: 200px;
   position: relative;
   overflow: hidden;
-  background: #060a10;
+  background: #070a0f;
 }
 
 .scope-canvas-wrap {
@@ -137,8 +181,8 @@ html, body {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 6px 12px;
-  background: #0e141e;
+  padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+  background: #0e1217;
   border-top: 1px solid var(--border);
 }
 
@@ -154,21 +198,25 @@ html, body {
   align-items: center;
   gap: 5px;
   padding: 4px 8px;
-  border-radius: 6px;
-  background: #131b27;
+  border-radius: 4px;
+  background: var(--surface);
   border: 1px solid var(--border);
   cursor: pointer;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
+  white-space: nowrap;
+  touch-action: manipulation;
   transition: border-color 0.12s, background 0.12s;
 }
 
 .ch-badge:hover {
-  background: #1a2435;
+  background: var(--surface-2);
+  border-color: var(--border-strong);
 }
 
 .ch-badge.selected {
-  background: #182334;
+  background: var(--surface-2);
 }
 
 .ch-power-dot {
@@ -178,28 +226,32 @@ html, body {
   border: none;
   padding: 0;
   cursor: pointer;
+  flex-shrink: 0;
+  touch-action: manipulation;
 }
 
 .ch-badge-id {
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ch-badge-vdiv {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .ch-badge-tag {
-  background: #1e293b;
-  color: #cbd5e1;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
   padding: 0 4px;
   border-radius: 3px;
   font-size: 10px;
 }
 
 .ch-badge-tag.tag-inv {
-  background: rgba(249, 115, 22, 0.2);
-  color: #fb923c;
+  background: var(--accent-dim);
+  border-color: rgba(240, 180, 41, 0.35);
+  color: var(--accent);
 }
 
 .ch-badge-pos {
@@ -208,7 +260,7 @@ html, body {
 }
 
 .ch-badge-off {
-  color: #475569;
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -221,30 +273,35 @@ html, body {
 
 .ch-editor-label {
   font-size: 11px;
-  font-weight: 700;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .knob-group {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: #131b27;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 2px 5px;
+  white-space: nowrap;
 }
 
 .knob-caption {
+  font-family: var(--font-sans);
   font-size: 10px;
+  font-weight: 600;
   color: var(--muted);
   margin-right: 2px;
 }
 
 .knob-val {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   min-width: 44px;
   text-align: center;
   color: var(--text);
@@ -253,7 +310,8 @@ html, body {
 .btn-xs {
   padding: 2px 7px;
   font-size: 11px;
-  border-radius: 4px;
+  border-radius: 3px;
+  touch-action: manipulation;
 }
 
 .btn-auto {
@@ -264,50 +322,66 @@ html, body {
 
 .btn-auto:hover:not(:disabled) {
   background: #166534;
+  border-color: #4ade80;
 }
 
 .control-divider-sm {
   width: 1px;
   height: 20px;
   background: var(--border);
+  flex-shrink: 0;
 }
 
 /* Measurements Bar */
 .measurements-bar {
   background: var(--surface);
   border-top: 1px solid var(--border);
-  padding: 7px 12px;
+  padding: 6px max(12px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.measurements-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .meas-empty {
+  font-family: var(--font-sans);
   color: var(--muted);
   text-align: center;
-  padding: 6px;
+  padding: 5px;
+}
+
+.meas-empty strong {
+  color: var(--text-soft);
 }
 
 .meas-row {
   display: flex;
   gap: 8px;
   align-items: stretch;
+  flex-wrap: nowrap;
 }
 
 .meas-card {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 5px 9px;
   min-width: 210px;
   flex: 1 1 210px;
 }
 
 .meas-card-cursor { border-left: 3px solid #38bdf8; }
-.meas-card-meta { border-left: 3px solid #94a3b8; }
+.meas-card-meta { border-left: 3px solid var(--border-strong); }
 
 .meas-card-title {
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 700;
   margin-bottom: 3px;
+  white-space: nowrap;
 }
 
 .meas-grid {
@@ -316,7 +390,8 @@ html, body {
   gap: 2px 8px;
   font-size: 11px;
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .meas-grid strong {
@@ -332,12 +407,21 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+}
+
+.drawer-col h4 {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .drawer-hint {
+  font-family: var(--font-sans);
   font-size: 12px;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .pin-table {
@@ -355,30 +439,179 @@ html, body {
 .pin-table th {
   background: var(--surface-2);
   color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
 }
 
-@media (max-width: 720px) {
+.pin-table td {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-soft);
+}
+
+/* Comfortable Touch Targets on Coarse Pointers */
+@media (pointer: coarse) {
+  .ctrl-select,
+  .ch-pill,
+  .ch-badge,
+  .btn-xs {
+    min-height: 36px;
+  }
+
+  .knob-group {
+    min-height: 36px;
+    padding: 0 4px;
+  }
+
+  .knob-group .btn-xs {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .ch-power-dot {
+    width: 10px;
+    height: 10px;
+  }
+
+  .trig-slider {
+    width: 104px;
+    height: 36px;
+  }
+
+  .trig-slider::-webkit-slider-thumb {
+    width: 22px;
+    height: 22px;
+  }
+
+  .trig-slider::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+/* Mobile Portrait (360–430px) & Compact Viewports */
+@media (max-width: 720px), (max-height: 500px) {
+  .mobile-only-btn {
+    display: inline-flex;
+  }
+
+  .control-bar.mobile-collapsed {
+    display: none;
+  }
+
   .control-bar {
     flex-wrap: nowrap;
     overflow-x: auto;
-    padding: 5px 8px;
+    padding: 5px max(8px, env(safe-area-inset-right)) 5px max(8px, env(safe-area-inset-left));
     gap: 8px;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
+
   .control-bar::-webkit-scrollbar {
     display: none;
   }
+
+  .control-bar > *,
   .control-group {
     flex-shrink: 0;
   }
+
   .scope-main {
-    min-height: 180px;
+    min-height: 160px;
   }
+
   .channel-strip {
-    padding: 5px 8px;
-    gap: 6px;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding: 5px max(8px, env(safe-area-inset-right)) 5px max(8px, env(safe-area-inset-left));
+    gap: 8px;
   }
+
+  .channel-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ch-badges-row,
+  .ch-editor-row {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+  }
+
+  .ch-badges-row > *,
+  .ch-editor-row > * {
+    flex-shrink: 0;
+  }
+
   .measurements-bar {
-    padding: 5px 8px;
+    padding: 5px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+
+  .meas-card {
+    flex: 0 0 auto;
+    min-width: 196px;
+    padding: 4px 8px;
+  }
+
+  .ctrl-select,
+  .ch-pill,
+  .ch-badge,
+  .btn-xs {
+    min-height: 36px;
+  }
+
+  .knob-group {
+    min-height: 36px;
+    padding: 0 4px;
+  }
+
+  .knob-group .btn-xs {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .trig-slider {
+    width: 96px;
+    height: 36px;
+  }
+
+  .trig-slider::-webkit-slider-thumb {
+    width: 22px;
+    height: 22px;
+  }
+
+  .trig-slider::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+/* Landscape Phones: squeeze vertical chrome further for maximum scope waveform height */
+@media (max-height: 500px) and (orientation: landscape) {
+  .scope-main {
+    min-height: 110px;
+  }
+
+  .control-bar {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .group-label {
+    font-size: 9px;
+  }
+
+  .channel-strip {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .measurements-bar {
+    padding-top: 4px;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
   }
 }

@@ -79,6 +79,7 @@ pub fn App() -> impl IntoView {
     let frame_version = RwSignal::new(0u64);
     let fps = RwSignal::new(0.0f64);
     let drawer_open = RwSignal::new(false);
+    let controls_open = RwSignal::new(true);
 
     let last_frame_ts = StoredValue::new(0.0f64);
     let last_meas_ts = StoredValue::new(0.0f64);
@@ -319,9 +320,11 @@ pub fn App() -> impl IntoView {
                 on_single_shot=on_single_shot
                 drawer_open=drawer_open
                 on_toggle_drawer=on_toggle_drawer
+                controls_open=controls_open
             />
 
             <ScopeControlBar
+                controls_open=controls_open
                 rate_code=rate_code
                 atten_code=atten_code
                 depth_code=depth_code
