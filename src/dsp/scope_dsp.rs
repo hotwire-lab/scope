@@ -424,8 +424,9 @@ pub fn compute_autoset(
     cfgs = compute_stack_configs(channel_mask, cfgs, Some(frame));
 
     // Center trigger level on trigger channel (or first active channel)
-    let tch = if !frame.channels_mv[trig_ch as usize].is_empty() {
-        trig_ch as usize
+    let trig_idx = (trig_ch as usize).min(3);
+    let tch = if !frame.channels_mv[trig_idx].is_empty() {
+        trig_idx
     } else {
         active.first().copied().unwrap_or(0)
     };

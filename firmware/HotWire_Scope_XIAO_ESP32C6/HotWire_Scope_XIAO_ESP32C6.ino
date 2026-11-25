@@ -22,6 +22,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_system.h"
+#include "soc/lp_aon_reg.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -80,12 +81,13 @@ struct ScopeConfig {
   uint8_t  test_gen_code;
   bool     cali_enabled;
   bool     adc_dirty;
+  bool     trig_dirty;
 };
 
 static volatile ScopeConfig g_cfg = {
   3, 0x03, 3, 1,
   0, 0, 0, 1550, 50,
-  0, 15, 1, true, true
+  0, 15, 1, true, true, false
 };
 
 static SemaphoreHandle_t g_serial_mutex = nullptr;
@@ -291,6 +293,7 @@ static void scope_capture_task(void* arg) {
     uint16_t pre_samples = (uint16_t)(((uint32_t)want_samples * min<uint8_t>(pre_pct, 75)) / 100U);
     uint16_t post_samples = want_samples - pre_samples;
     bool     cali_en = g_cfg.cali_enabled;
+    g_cfg.trig_dirty = false;
 
     uint8_t  fps_c = g_cfg.target_fps;
     uint32_t min_interval_ms = 1000U / max<uint8_t>(fps_c, 1);
@@ -316,7 +319,7 @@ static void scope_capture_task(void* arg) {
     static const int16_t TRIG_HYST_MV = 15;
     bool trig_armed = false;
 
-    while (g_cfg.run_mode != 0 && !g_cfg.adc_dirty) {
+    while (g_cfg.run_mode != 0 && !g_cfg.adc_dirty && !g_cfg.trig_dirty) {
       uint32_t ret_num = 0;
       esp_err_t err = adc_continuous_read(g_adc_handle, g_dma_buf, DMA_READ_BYTES, &ret_num, 20);
       if (err == ESP_OK && ret_num > 0) {
@@ -338,7 +341,7 @@ static void scope_capture_task(void* arg) {
             total_trig_ch++;
             if (!triggered) {
               if (trig_mode == 3) {
-                if (total_trig_ch >= pre_samples) {
+                if (total_trig_ch >= (size_t)pre_samples + 1) {
                   triggered = true;
                   for (uint8_t c = 0; c < 3; ++c) {
                     ch_trig_pos[c] = (write_idx[c] > 0 ? (write_idx[c] - 1) : 0) & (RING_CAP - 1);
@@ -352,7 +355,7 @@ static void scope_capture_task(void* arg) {
                       (trig_edge == 1 && mv_i >= th_i + TRIG_HYST_MV)) {
                     trig_armed = true;
                   }
-                } else if (total_trig_ch >= pre_samples) {
+                } else if (total_trig_ch >= (size_t)pre_samples + 1) {
                   bool crossed = (trig_edge == 0) ? (mv_i >= th_i) : (mv_i <= th_i);
                   if (crossed) {
                     triggered = true;
@@ -372,12 +375,14 @@ static void scope_capture_task(void* arg) {
 
       if (triggered && post_collected >= post_samples + 2) break;
       if (!triggered && (millis() - acq_start_ms) >= timeout_ms) {
-        if (trig_mode == 0 && total_trig_ch >= want_samples) {
-          for (uint8_t c = 0; c < 3; ++c) {
-            size_t w = write_idx[c];
-            ch_trig_pos[c] = (w >= post_samples ? (w - post_samples) : 0) & (RING_CAP - 1);
+        if (trig_mode == 0) {
+          if (total_trig_ch >= want_samples) {
+            for (uint8_t c = 0; c < 3; ++c) {
+              size_t w = write_idx[c];
+              ch_trig_pos[c] = (w >= post_samples ? (w - post_samples) : 0) & (RING_CAP - 1);
+            }
+            break;
           }
-          break;
         } else if (trig_mode == 1) {
           acq_start_ms = millis();
           vTaskDelay(pdMS_TO_TICKS(5));
@@ -387,7 +392,7 @@ static void scope_capture_task(void* arg) {
       }
     }
 
-    if (g_cfg.run_mode == 0 || g_cfg.adc_dirty) continue;
+    if (g_cfg.run_mode == 0 || g_cfg.adc_dirty || g_cfg.trig_dirty) continue;
 
     uint8_t  rate_c = g_cfg.rate_code;
     uint32_t total_rate = RATE_TABLE[min<uint8_t>(rate_c, 6)];
@@ -467,6 +472,7 @@ static void process_command(const uint8_t cmd[8]) {
       g_cfg.trig_ch   = min<uint8_t>((cmd[3] >> 6) & 0x03, 2);
       g_cfg.trig_level_mv = (uint16_t)cmd[4] | ((uint16_t)cmd[5] << 8);
       g_cfg.pre_trig_pct = min<uint8_t>(cmd[6], 75);
+      g_cfg.trig_dirty = true;
       break;
     case CMD_SCOPE_RUN:
       g_cfg.run_mode = min<uint8_t>(cmd[3], 2);
@@ -479,6 +485,8 @@ static void process_command(const uint8_t cmd[8]) {
       if (cmd[3] == 0xB0 && cmd[4] == 0x07 && cmd[5] == 0x10 && cmd[6] == 0xAD) {
         g_cfg.run_mode = 0;
         vTaskDelay(pdMS_TO_TICKS(25));
+        REG_SET_BIT(LP_AON_SYS_CFG_REG, LP_AON_FORCE_DOWNLOAD_BOOT);
+        vTaskDelay(pdMS_TO_TICKS(10));
         esp_restart();
       }
       break;

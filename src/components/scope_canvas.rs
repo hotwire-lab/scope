@@ -135,9 +135,9 @@ pub fn ScopeCanvas(
     let calc_plot_geom = move |css_w: f64, css_h: f64, fft_on: bool, disp: DisplayMode| -> (f64, f64) {
         let plot_w = (css_w - PAD_L - PAD_R).max(120.0);
         let scope_h = if fft_on && disp == DisplayMode::Yt {
-            (css_h - PAD_T - PAD_B - 30.0) * 0.64
+            ((css_h - PAD_T - PAD_B - 30.0) * 0.64).max(70.0)
         } else {
-            (css_h - PAD_T - PAD_B).max(120.0)
+            (css_h - PAD_T - PAD_B).max(70.0)
         };
         (plot_w, scope_h)
     };
@@ -182,8 +182,8 @@ pub fn ScopeCanvas(
         };
 
         let rect = canvas.get_bounding_client_rect();
-        let css_w = rect.width().max(320.0);
-        let css_h = rect.height().max(260.0);
+        let css_w = rect.width().max(240.0);
+        let css_h = rect.height().max(110.0);
         let dpr = web_sys::window()
             .map(|w| w.device_pixel_ratio().clamp(1.0, 2.5))
             .unwrap_or(1.0);
@@ -211,14 +211,15 @@ pub fn ScopeCanvas(
         let (plot_w, scope_h) = calc_plot_geom(css_w, css_h, fft_on, d_mode);
 
         // Draw authentic 10x8 oscilloscope graticule with center crosshair sub-divisions
+        let grat_ch = if d_mode == DisplayMode::Xy { 1 } else { sel_ch };
         draw_graticule(
             &ctx,
             PAD_L,
             PAD_T,
             plot_w,
             scope_h,
-            &cfgs[sel_ch],
-            CHANNEL_COLORS[sel_ch],
+            &cfgs[grat_ch],
+            CHANNEL_COLORS[grat_ch],
             d_mode,
         );
 
@@ -756,10 +757,13 @@ pub fn ScopeCanvas(
             return;
         }
 
-        // Otherwise zoom horizontal timebase anchored at cursor X
+        // Otherwise zoom horizontal timebase anchored at cursor X (Y-T mode only)
         let fft_on = show_fft.get_untracked();
         let d_mode = display_mode.get_untracked();
-        let (plot_w, _) = calc_plot_geom(rect.width(), rect.height(), fft_on, d_mode);
+        if d_mode == DisplayMode::Xy {
+            return;
+        }
+        let (plot_w, _) = calc_plot_geom(rect.width().max(240.0), rect.height().max(110.0), fft_on, d_mode);
         let anchor_norm = ((x - PAD_L) / plot_w).clamp(0.0, 1.0);
         let factor = if ev.delta_y() < 0.0 { 1.25 } else { 0.8 };
         let old_z = zoom.get_untracked().max(1.0);
@@ -780,7 +784,7 @@ pub fn ScopeCanvas(
         let y = ev.client_y() as f64 - rect.top();
         let fft_on = show_fft.get_untracked();
         let d_mode = display_mode.get_untracked();
-        let (plot_w, scope_h) = calc_plot_geom(rect.width(), rect.height(), fft_on, d_mode);
+        let (plot_w, scope_h) = calc_plot_geom(rect.width().max(240.0), rect.height().max(110.0), fft_on, d_mode);
 
         let mut active_ptrs = 0usize;
         gesture_tracker.update_value(|gt| {
@@ -897,7 +901,7 @@ pub fn ScopeCanvas(
         let y = ev.client_y() as f64 - rect.top();
         let fft_on = show_fft.get_untracked();
         let d_mode = display_mode.get_untracked();
-        let (plot_w, scope_h) = calc_plot_geom(rect.width(), rect.height(), fft_on, d_mode);
+        let (plot_w, scope_h) = calc_plot_geom(rect.width().max(240.0), rect.height().max(110.0), fft_on, d_mode);
         let norm_x = ((x - PAD_L) / plot_w).clamp(0.0, 1.0);
 
         let mut gesture_delta = None;
@@ -1429,7 +1433,12 @@ fn draw_graticule(
         }
         let y = y0 + (j as f64 / 8.0) * h;
         let divs_from_center = 4.0 - (j as f64);
-        let mv = (divs_from_center - off) * vdiv_mv;
+        let raw_mv = (divs_from_center - off) * vdiv_mv;
+        let mv = if display_mode == DisplayMode::Yt && sel_cfg.invert {
+            -raw_mv
+        } else {
+            raw_mv
+        };
         let label = if mv.abs() >= 1000.0 {
             format!("{:+.1}V", mv / 1000.0)
         } else if mv.abs() < 1.0 {

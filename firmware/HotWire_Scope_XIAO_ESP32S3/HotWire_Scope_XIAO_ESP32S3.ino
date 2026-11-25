@@ -87,12 +87,13 @@ struct ScopeConfig {
   uint8_t  test_gen_code;   // 0=Off, 1=1k, 2=5k, 3=10k, 4=50k
   bool     cali_enabled;
   bool     adc_dirty;
+  bool     trig_dirty;
 };
 
 static volatile ScopeConfig g_cfg = {
   3, 0x03, 3, 1,
   0, 0, 0, 1550, 50,
-  0, 20, 1, true, true
+  0, 20, 1, true, true, false
 };
 
 static SemaphoreHandle_t g_serial_mutex = nullptr;
@@ -321,6 +322,7 @@ static void scope_capture_task(void* arg) {
     uint16_t pre_samples = (uint16_t)(((uint32_t)want_samples * min<uint8_t>(pre_pct, 75)) / 100U);
     uint16_t post_samples = want_samples - pre_samples;
     bool     cali_en = g_cfg.cali_enabled;
+    g_cfg.trig_dirty = false;
 
     // Frame rate pacing: drain DMA briefly and yield so FreeRTOS / USB stay responsive
     uint8_t  fps_c = g_cfg.target_fps;
@@ -349,7 +351,7 @@ static void scope_capture_task(void* arg) {
     static const int16_t TRIG_HYST_MV = 15;
     bool trig_armed = false;
 
-    while (g_cfg.run_mode != 0 && !g_cfg.adc_dirty) {
+    while (g_cfg.run_mode != 0 && !g_cfg.adc_dirty && !g_cfg.trig_dirty) {
       uint32_t ret_num = 0;
       esp_err_t err = adc_continuous_read(g_adc_handle, g_dma_buf, DMA_READ_BYTES, &ret_num, 20);
       if (err == ESP_OK && ret_num > 0) {
@@ -371,8 +373,8 @@ static void scope_capture_task(void* arg) {
             total_trig_ch++;
             if (!triggered) {
               if (trig_mode == 3) {
-                // Free Run: trigger immediately once pre-trigger is filled
-                if (total_trig_ch >= pre_samples) {
+                // Free Run: trigger immediately once pre-trigger is filled on all channels
+                if (total_trig_ch >= (size_t)pre_samples + 1) {
                   triggered = true;
                   for (uint8_t c = 0; c < 4; ++c) {
                     ch_trig_pos[c] = (write_idx[c] > 0 ? (write_idx[c] - 1) : 0) & (RING_CAP - 1);
@@ -386,7 +388,7 @@ static void scope_capture_task(void* arg) {
                       (trig_edge == 1 && mv_i >= th_i + TRIG_HYST_MV)) {
                     trig_armed = true;
                   }
-                } else if (total_trig_ch >= pre_samples) {
+                } else if (total_trig_ch >= (size_t)pre_samples + 1) {
                   bool crossed = (trig_edge == 0) ? (mv_i >= th_i) : (mv_i <= th_i);
                   if (crossed) {
                     triggered = true;
@@ -426,7 +428,7 @@ static void scope_capture_task(void* arg) {
       }
     }
 
-    if (g_cfg.run_mode == 0 || g_cfg.adc_dirty) continue;
+    if (g_cfg.run_mode == 0 || g_cfg.adc_dirty || g_cfg.trig_dirty) continue;
 
     // Extract planar frame (phase-aligned per channel to exact trigger instant)
     uint8_t  rate_c = g_cfg.rate_code;
@@ -513,6 +515,7 @@ static void process_command(const uint8_t cmd[8]) {
       g_cfg.trig_ch   = (cmd[3] >> 6) & 0x03;
       g_cfg.trig_level_mv = (uint16_t)cmd[4] | ((uint16_t)cmd[5] << 8);
       g_cfg.pre_trig_pct = min<uint8_t>(cmd[6], 75);
+      g_cfg.trig_dirty = true;
       break;
     case CMD_SCOPE_RUN:
       g_cfg.run_mode = min<uint8_t>(cmd[3], 2);
