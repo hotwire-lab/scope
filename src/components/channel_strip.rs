@@ -1,13 +1,15 @@
 use leptos::prelude::*;
 
 use crate::protocol::types::{
-    ChannelViewConfig, MathMode, CHANNEL_COLORS, MATH_COLOR, V_PER_DIV_STEPS_MV,
+    BoardCapabilitiesFrame, ChannelViewConfig, MathMode, CHANNEL_COLORS, MATH_COLOR,
+    V_PER_DIV_STEPS_MV,
 };
 
 #[component]
 #[allow(clippy::too_many_arguments)]
 pub fn ChannelStrip(
     channel_mask: RwSignal<u8>,
+    board_caps: RwSignal<Option<BoardCapabilitiesFrame>>,
     channel_cfgs: RwSignal<[ChannelViewConfig; 4]>,
     selected_ch: RwSignal<usize>,
     math_mode: RwSignal<MathMode>,
@@ -17,6 +19,13 @@ pub fn ChannelStrip(
     on_stack: Callback<()>,
     on_clear_persist: Callback<()>,
 ) -> impl IntoView {
+    let max_channels = move || {
+        board_caps
+            .get()
+            .map(|c| c.max_channels.clamp(1, 4) as usize)
+            .unwrap_or(4)
+    };
+
     let step_vdiv = move |delta: isize| {
         let ch = selected_ch.get_untracked().min(3);
         channel_cfgs.update(|cfgs| {
@@ -101,6 +110,9 @@ pub fn ChannelStrip(
                         view! {
                             <div
                                 class=move || {
+                                    if max_channels() <= ch {
+                                        return "ch-badge disabled";
+                                    }
                                     let active = (channel_mask.get() & (1 << ch)) != 0;
                                     let sel = selected_ch.get() == ch;
                                     match (active, sel) {
@@ -121,6 +133,9 @@ pub fn ChannelStrip(
                                     }
                                 }
                                 on:click=move |_| {
+                                    if max_channels() <= ch {
+                                        return;
+                                    }
                                     let active = (channel_mask.get_untracked() & (1 << ch)) != 0;
                                     if !active {
                                         on_toggle_channel.run(ch as u8);
@@ -132,6 +147,7 @@ pub fn ChannelStrip(
                                 <button
                                     type="button"
                                     class="ch-power-dot"
+                                    disabled=move || max_channels() <= ch
                                     style=move || {
                                         if (channel_mask.get() & (1 << ch)) != 0 {
                                             format!("background: {color}; box-shadow: 0 0 6px {color};")

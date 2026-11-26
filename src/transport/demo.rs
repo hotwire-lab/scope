@@ -72,7 +72,7 @@ impl DemoSimulator {
                 if compute_xor_checksum(&frame[..7]) == frame[7] {
                     match frame[2] {
                         CMD_GET_CAPS | CMD_PING_STATUS => {
-                            let caps = r#"{"board":"XIAO-ESP32-S3","firmware":"1.0.0-scope-demo","scope":true,"max_channels":4,"max_rate_hz":1000000,"adc_bits":12}"#;
+                            let caps = r#"{"board":"XIAO-ESP32-S3","firmware":"1.1.0-scope-demo","scope":true,"max_channels":4,"max_rate_hz":1000000,"adc_bits":12}"#;
                             out.extend_from_slice(&encode_response_frame(
                                 TYPE_BOARD_CAPABILITIES,
                                 caps.as_bytes(),

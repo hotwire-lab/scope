@@ -36,7 +36,7 @@
   #error "This sketch targets Seeed Studio XIAO ESP32-S3."
 #endif
 
-#define HOTWIRE_FW_VERSION "1.0.0-scope"
+#define HOTWIRE_FW_VERSION "1.1.0-scope"
 #define HOTWIRE_BOARD_NAME "XIAO-ESP32-S3"
 
 // XIAO ESP32-S3 Analog Pins: D0=GPIO1(CH0), D1=GPIO2(CH1), D2=GPIO3(CH2), D3=GPIO4(CH3)
@@ -281,6 +281,29 @@ static void configure_adc(uint8_t rate_code, uint8_t ch_mask, uint8_t atten_code
   }
 }
 
+// ADC pattern sampling is sequential. At the moment the trigger channel is
+// observed, channels later in the pattern have not yet produced their sample
+// for that conversion round. Record the per-channel slot that corresponds to
+// the same trigger round so the extracted waveforms stay phase-aligned.
+static void snapshotTriggerPositions(
+  const size_t writeIdx[4],
+  uint8_t chMask,
+  uint8_t trigCh,
+  size_t out[4]
+) {
+  for (uint8_t c = 0; c < 4; ++c) {
+    if ((chMask & (1U << c)) == 0) {
+      out[c] = 0;
+      continue;
+    }
+    if (c <= trigCh) {
+      out[c] = (writeIdx[c] > 0 ? writeIdx[c] - 1 : 0) & (RING_CAP - 1);
+    } else {
+      out[c] = writeIdx[c] & (RING_CAP - 1);
+    }
+  }
+}
+
 // Core 1 Task: Continuous GDMA Acquisition, Triggering & Packetizing
 static void scope_capture_task(void* arg) {
   (void)arg;
@@ -340,6 +363,7 @@ static void scope_capture_task(void* arg) {
     size_t ch_trig_pos[4] = { 0, 0, 0, 0 };
     size_t total_trig_ch = 0;
     bool triggered = false;
+    bool autoPending = false;
     size_t post_collected = 0;
     bool saturated = false;
 
@@ -371,14 +395,16 @@ static void scope_capture_task(void* arg) {
 
           if (ch == trig_ch) {
             total_trig_ch++;
-            if (!triggered) {
+            if (autoPending && !triggered) {
+              autoPending = false;
+              triggered = true;
+              snapshotTriggerPositions(write_idx, ch_mask, trig_ch, ch_trig_pos);
+            } else if (!triggered) {
               if (trig_mode == 3) {
                 // Free Run: trigger immediately once pre-trigger is filled on all channels
                 if (total_trig_ch >= (size_t)pre_samples + 1) {
                   triggered = true;
-                  for (uint8_t c = 0; c < 4; ++c) {
-                    ch_trig_pos[c] = (write_idx[c] > 0 ? (write_idx[c] - 1) : 0) & (RING_CAP - 1);
-                  }
+                  snapshotTriggerPositions(write_idx, ch_mask, trig_ch, ch_trig_pos);
                 }
               } else {
                 int16_t mv_i = (int16_t)mv;
@@ -392,9 +418,7 @@ static void scope_capture_task(void* arg) {
                   bool crossed = (trig_edge == 0) ? (mv_i >= th_i) : (mv_i <= th_i);
                   if (crossed) {
                     triggered = true;
-                    for (uint8_t c = 0; c < 4; ++c) {
-                      ch_trig_pos[c] = (write_idx[c] > 0 ? (write_idx[c] - 1) : 0) & (RING_CAP - 1);
-                    }
+                    snapshotTriggerPositions(write_idx, ch_mask, trig_ch, ch_trig_pos);
                   }
                 }
               }
@@ -412,11 +436,7 @@ static void scope_capture_task(void* arg) {
         if (trig_mode == 0) {
           // Auto mode fallback: force capture once enough samples exist
           if (total_trig_ch >= want_samples) {
-            for (uint8_t c = 0; c < 4; ++c) {
-              size_t w = write_idx[c];
-              ch_trig_pos[c] = (w >= post_samples ? (w - post_samples) : 0) & (RING_CAP - 1);
-            }
-            break;
+            autoPending = true;
           }
         } else if (trig_mode == 1) {
           // Normal mode: keep waiting but yield

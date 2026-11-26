@@ -7,6 +7,8 @@ use crate::protocol::types::*;
 #[allow(clippy::too_many_arguments)]
 pub fn ScopeControlBar(
     controls_open: RwSignal<bool>,
+    board_caps: RwSignal<Option<BoardCapabilitiesFrame>>,
+    channel_mask: RwSignal<u8>,
     rate_code: RwSignal<u8>,
     atten_code: RwSignal<u8>,
     depth_code: RwSignal<u8>,
@@ -27,6 +29,19 @@ pub fn ScopeControlBar(
     on_apply_run: Callback<()>,
     on_reset_view: Callback<()>,
 ) -> impl IntoView {
+    let max_channels = move || {
+        board_caps
+            .get()
+            .map(|c| usize::from(c.max_channels.clamp(1, 4)))
+            .unwrap_or(4)
+    };
+    let max_rate_hz = move || {
+        board_caps
+            .get()
+            .map(|c| c.max_rate_hz)
+            .unwrap_or(u32::MAX)
+    };
+
     view! {
         <section class=move || {
             if controls_open.get() {
@@ -48,14 +63,18 @@ pub fn ScopeControlBar(
                         }
                     }
                 >
-                    {SCOPE_RATE_PRESETS
-                        .iter()
-                        .map(|p| {
-                            view! {
-                                <option value=p.code.to_string()>{p.label}</option>
-                            }
-                        })
-                        .collect_view()}
+                    {move || {
+                        let max_hz = max_rate_hz();
+                        SCOPE_RATE_PRESETS
+                            .iter()
+                            .filter(|p| p.total_rate_hz <= max_hz)
+                            .map(|p| {
+                                view! {
+                                    <option value=p.code.to_string()>{p.label}</option>
+                                }
+                            })
+                            .collect_view()
+                    }}
                 </select>
             </div>
 
@@ -141,10 +160,15 @@ pub fn ScopeControlBar(
                             }
                         }
                     >
-                        <option value="0">"CH1"</option>
-                        <option value="1">"CH2"</option>
-                        <option value="2">"CH3"</option>
-                        <option value="3">"CH4"</option>
+                        {move || {
+                            let mask = channel_mask.get();
+                            (0..max_channels())
+                                .filter(move |ch| mask & (1u8 << ch) != 0)
+                                .map(|ch| {
+                                    view! { <option value=ch.to_string()>{format!("CH{}", ch + 1)}</option> }
+                                })
+                                .collect_view()
+                        }}
                     </select>
                     <button
                         class="btn btn-sm btn-secondary"
@@ -223,10 +247,15 @@ pub fn ScopeControlBar(
                                         }
                                     }
                                 >
-                                    <option value="0">"CH1"</option>
-                                    <option value="1">"CH2"</option>
-                                    <option value="2">"CH3"</option>
-                                    <option value="3">"CH4"</option>
+                                    {move || {
+                                        let mask = channel_mask.get();
+                                        (0..max_channels())
+                                            .filter(move |ch| mask & (1u8 << ch) != 0)
+                                            .map(|ch| {
+                                                view! { <option value=ch.to_string()>{format!("CH{}", ch + 1)}</option> }
+                                            })
+                                            .collect_view()
+                                    }}
                                 </select>
                             })
                         } else {

@@ -31,7 +31,7 @@
   #error "This sketch targets Seeed Studio XIAO ESP32-C6."
 #endif
 
-#define HOTWIRE_FW_VERSION "1.0.0-scope-c6"
+#define HOTWIRE_FW_VERSION "1.1.0-scope-c6"
 #define HOTWIRE_BOARD_NAME "XIAO-ESP32-C6"
 
 // XIAO ESP32-C6 Analog Pins: D0=GPIO0(CH0), D1=GPIO1(CH1), D2=GPIO2(CH2)
@@ -252,6 +252,25 @@ static void configure_adc(uint8_t rate_code, uint8_t ch_mask, uint8_t atten_code
   }
 }
 
+static void snapshotTriggerPositions(
+  const size_t writeIdx[3],
+  uint8_t chMask,
+  uint8_t trigCh,
+  size_t out[3]
+) {
+  for (uint8_t c = 0; c < 3; ++c) {
+    if ((chMask & (1U << c)) == 0) {
+      out[c] = 0;
+      continue;
+    }
+    if (c <= trigCh) {
+      out[c] = (writeIdx[c] > 0 ? writeIdx[c] - 1 : 0) & (RING_CAP - 1);
+    } else {
+      out[c] = writeIdx[c] & (RING_CAP - 1);
+    }
+  }
+}
+
 static void scope_capture_task(void* arg) {
   (void)arg;
   uint32_t last_tx_ms = 0;
@@ -308,6 +327,7 @@ static void scope_capture_task(void* arg) {
     size_t ch_trig_pos[3] = { 0, 0, 0 };
     size_t total_trig_ch = 0;
     bool triggered = false;
+    bool autoPending = false;
     size_t post_collected = 0;
     bool saturated = false;
 
@@ -339,13 +359,15 @@ static void scope_capture_task(void* arg) {
 
           if (ch == trig_ch) {
             total_trig_ch++;
-            if (!triggered) {
+            if (autoPending && !triggered) {
+              autoPending = false;
+              triggered = true;
+              snapshotTriggerPositions(write_idx, ch_mask, trig_ch, ch_trig_pos);
+            } else if (!triggered) {
               if (trig_mode == 3) {
                 if (total_trig_ch >= (size_t)pre_samples + 1) {
                   triggered = true;
-                  for (uint8_t c = 0; c < 3; ++c) {
-                    ch_trig_pos[c] = (write_idx[c] > 0 ? (write_idx[c] - 1) : 0) & (RING_CAP - 1);
-                  }
+                  snapshotTriggerPositions(write_idx, ch_mask, trig_ch, ch_trig_pos);
                 }
               } else {
                 int16_t mv_i = (int16_t)mv;
@@ -359,9 +381,7 @@ static void scope_capture_task(void* arg) {
                   bool crossed = (trig_edge == 0) ? (mv_i >= th_i) : (mv_i <= th_i);
                   if (crossed) {
                     triggered = true;
-                    for (uint8_t c = 0; c < 3; ++c) {
-                      ch_trig_pos[c] = (write_idx[c] > 0 ? (write_idx[c] - 1) : 0) & (RING_CAP - 1);
-                    }
+                    snapshotTriggerPositions(write_idx, ch_mask, trig_ch, ch_trig_pos);
                   }
                 }
               }
@@ -377,11 +397,7 @@ static void scope_capture_task(void* arg) {
       if (!triggered && (millis() - acq_start_ms) >= timeout_ms) {
         if (trig_mode == 0) {
           if (total_trig_ch >= want_samples) {
-            for (uint8_t c = 0; c < 3; ++c) {
-              size_t w = write_idx[c];
-              ch_trig_pos[c] = (w >= post_samples ? (w - post_samples) : 0) & (RING_CAP - 1);
-            }
-            break;
+            autoPending = true;
           }
         } else if (trig_mode == 1) {
           acq_start_ms = millis();

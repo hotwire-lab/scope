@@ -15,8 +15,9 @@ use crate::dsp::scope_dsp::{compute_autoset, compute_stack_configs};
 use crate::protocol::codec::{build_scope_cfg_cmd, build_scope_run_cmd, build_scope_trig_cmd};
 use crate::protocol::demuxer::ProtocolDemuxer;
 use crate::protocol::types::{
-    ChannelViewConfig, DecodedFrame, DisplayMode, MathMode, PersistenceMode, ScopeFrame,
-    SCOPE_EDGE_RISING, SCOPE_RUN_CONTINUOUS, SCOPE_RUN_SINGLE, SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
+    BoardCapabilitiesFrame, ChannelViewConfig, DecodedFrame, DisplayMode, MathMode,
+    PersistenceMode, ScopeFrame, SCOPE_EDGE_RISING, SCOPE_RATE_PRESETS, SCOPE_RUN_CONTINUOUS,
+    SCOPE_RUN_SINGLE, SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
 };
 use crate::transport::serial::{create_scope_transport, TransportSnapshot};
 
@@ -27,12 +28,30 @@ fn perf_now() -> f64 {
         .unwrap_or(0.0)
 }
 
+fn supported_channels(caps: Option<&BoardCapabilitiesFrame>) -> usize {
+    caps.map(|c| usize::from(c.max_channels.clamp(1, 4)))
+        .unwrap_or(4)
+}
+
+fn max_rate_code(caps: Option<&BoardCapabilitiesFrame>) -> u8 {
+    let Some(caps) = caps else {
+        return 6;
+    };
+    SCOPE_RATE_PRESETS
+        .iter()
+        .filter(|p| p.total_rate_hz <= caps.max_rate_hz)
+        .map(|p| p.code)
+        .max()
+        .unwrap_or(0)
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let serial_transport = StoredValue::new_local(create_scope_transport());
 
     let transport = RwSignal::new(serial_transport.with_value(|t| t.snapshot()));
     let identity = RwSignal::new(None::<BoardIdentity>);
+    let board_caps = RwSignal::new(None::<BoardCapabilitiesFrame>);
     let mismatch = RwSignal::new(None::<FirmwareMismatch>);
     let flasher_mismatch = RwSignal::new(None::<FirmwareMismatch>);
     let handshake_guard = StoredValue::new_local(HandshakeGuard::new(ToolId::Oscilloscope));
@@ -140,6 +159,7 @@ pub fn App() -> impl IntoView {
                     handshake_guard.update_value(|g| g.cancel());
                     running.set(false);
                     identity.set(None);
+                    board_caps.set(None);
                     fps.set(0.0);
                     last_frame_ts.set_value(0.0);
                     demuxer.update_value(|d| d.reset());
@@ -163,7 +183,7 @@ pub fn App() -> impl IntoView {
                 let now = perf_now();
                 demuxer.update_value(|d| {
                     d.feed(bytes, now, |frame| match frame {
-                        DecodedFrame::Capabilities(id, _c) => {
+                        DecodedFrame::Capabilities(id, caps) => {
                             serial_transport.with_value(|t| t.notify_handshake_ok());
                             let is_usb = transport.get_untracked().status.is_usb_connected();
                             if is_usb {
@@ -183,6 +203,38 @@ pub fn App() -> impl IntoView {
                             mismatch.set(None);
                             flasher_mismatch.set(None);
                             drawer_open.set(false);
+
+                            // Keep the UI inside the limits reported by the
+                            // connected board (C6 has 3 channels and no turbo).
+                            let channels = supported_channels(Some(&caps));
+                            let valid_mask = if channels >= 4 {
+                                0x0f
+                            } else {
+                                (1u8 << channels) - 1
+                            };
+                            let next_mask = {
+                                let masked = channel_mask.get_untracked() & valid_mask;
+                                if masked == 0 { 1 } else { masked }
+                            };
+                            channel_mask.set(next_mask);
+                            let max_ch = (channels.saturating_sub(1)) as u8;
+                            rate_code.update(|v| *v = (*v).min(max_rate_code(Some(&caps))));
+                            trig_channel.update(|v| *v = (*v).min(max_ch));
+                            fft_channel.update(|v| *v = (*v).min(max_ch));
+                            selected_ch.update(|v| *v = (*v).min(max_ch as usize));
+                            if next_mask & (1 << trig_channel.get_untracked()) == 0 {
+                                let first = (0..channels)
+                                    .find(|ch| next_mask & (1u8 << ch) != 0)
+                                    .unwrap_or(0);
+                                trig_channel.set(first as u8);
+                            }
+                            if next_mask & (1 << fft_channel.get_untracked()) == 0 {
+                                let first = (0..channels)
+                                    .find(|ch| next_mask & (1u8 << ch) != 0)
+                                    .unwrap_or(0);
+                                fft_channel.set(first as u8);
+                            }
+                            board_caps.set(Some(caps));
                             identity.set(Some(id));
                             send_cfg();
                             send_trig();
@@ -272,14 +324,36 @@ pub fn App() -> impl IntoView {
     });
 
     let on_toggle_channel = Callback::new(move |ch: u8| {
+        let channels = supported_channels(board_caps.get_untracked().as_ref());
+        if ch as usize >= channels {
+            return;
+        }
         channel_mask.update(|m| {
             let next = *m ^ (1 << ch);
             if next & 0x0f != 0 {
                 *m = next & 0x0f;
             }
         });
+        let mask = channel_mask.get_untracked();
+        let first_active = (0..channels)
+            .find(|c| mask & (1u8 << c) != 0)
+            .unwrap_or(0);
+        let mut trig_changed = false;
+        if mask & (1 << trig_channel.get_untracked()) == 0 {
+            trig_channel.set(first_active as u8);
+            trig_changed = true;
+        }
+        if mask & (1 << fft_channel.get_untracked()) == 0 {
+            fft_channel.set(first_active as u8);
+        }
+        if selected_ch.get_untracked() >= channels {
+            selected_ch.set(first_active);
+        }
         persist_clear_ver.update(|v| *v = v.wrapping_add(1));
         send_cfg();
+        if trig_changed {
+            send_trig();
+        }
     });
 
     let on_autoset = Callback::new(move |_| {
@@ -337,6 +411,8 @@ pub fn App() -> impl IntoView {
 
             <ScopeControlBar
                 controls_open=controls_open
+                board_caps=board_caps
+                channel_mask=channel_mask
                 rate_code=rate_code
                 atten_code=atten_code
                 depth_code=depth_code
@@ -386,6 +462,7 @@ pub fn App() -> impl IntoView {
 
             <ChannelStrip
                 channel_mask=channel_mask
+                board_caps=board_caps
                 channel_cfgs=channel_cfgs
                 selected_ch=selected_ch
                 math_mode=math_mode
