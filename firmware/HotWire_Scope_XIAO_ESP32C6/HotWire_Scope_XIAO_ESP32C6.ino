@@ -26,12 +26,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "hotwire_protocol.h"
 
 #ifndef CONFIG_IDF_TARGET_ESP32C6
   #error "This sketch targets Seeed Studio XIAO ESP32-C6."
 #endif
 
-#define HOTWIRE_FW_VERSION "1.1.0-scope-c6"
+#define HOTWIRE_FW_VERSION "1.1.1-scope-c6"
 #define HOTWIRE_BOARD_NAME "XIAO-ESP32-C6"
 
 // XIAO ESP32-C6 Analog Pins: D0=GPIO0(CH0), D1=GPIO1(CH1), D2=GPIO2(CH2)
@@ -150,7 +151,7 @@ static void send_frame(uint8_t type_id, const uint8_t* payload, uint16_t len) {
 static void send_capabilities() {
   const char* json =
     "{\"board\":\"" HOTWIRE_BOARD_NAME "\","
-    "\"firmware\":\"" HOTWIRE_FW_VERSION "\","
+    "\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"schema\":2,\"tool\":\"scope\","
     "\"scope\":true,\"max_channels\":3,\"max_rate_hz\":83333,\"adc_bits\":12}";
   send_frame(TYPE_BOARD_CAPS, (const uint8_t*)json, (uint16_t)strlen(json));
 }
@@ -498,7 +499,7 @@ static void process_command(const uint8_t cmd[8]) {
       apply_test_generator(g_cfg.test_gen_code);
       break;
     case CMD_BOOTLOADER:
-      if (cmd[3] == 0xB0 && cmd[4] == 0x07 && cmd[5] == 0x10 && cmd[6] == 0xAD) {
+      if (hotwire_is_bootloader_magic(cmd[3], cmd[4], cmd[5], cmd[6])) {
         g_cfg.run_mode = 0;
         vTaskDelay(pdMS_TO_TICKS(25));
         REG_SET_BIT(LP_AON_SYS_CFG_REG, LP_AON_FORCE_DOWNLOAD_BOOT);

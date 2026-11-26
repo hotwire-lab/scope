@@ -1,9 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use hotwire_core::ui::{
-    apply_anchored_zoom, apply_horizontal_pan, GestureDelta, PinchPanTracker,
-};
+use hotwire_core::ui::{apply_anchored_zoom, apply_horizontal_pan, GestureDelta, PinchPanTracker};
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -132,15 +130,16 @@ pub fn ScopeCanvas(
         cb.forget();
     }
 
-    let calc_plot_geom = move |css_w: f64, css_h: f64, fft_on: bool, disp: DisplayMode| -> (f64, f64) {
-        let plot_w = (css_w - PAD_L - PAD_R).max(120.0);
-        let scope_h = if fft_on && disp == DisplayMode::Yt {
-            ((css_h - PAD_T - PAD_B - 30.0) * 0.64).max(70.0)
-        } else {
-            (css_h - PAD_T - PAD_B).max(70.0)
+    let calc_plot_geom =
+        move |css_w: f64, css_h: f64, fft_on: bool, disp: DisplayMode| -> (f64, f64) {
+            let plot_w = (css_w - PAD_L - PAD_R).max(120.0);
+            let scope_h = if fft_on && disp == DisplayMode::Yt {
+                ((css_h - PAD_T - PAD_B - 30.0) * 0.64).max(70.0)
+            } else {
+                (css_h - PAD_T - PAD_B).max(70.0)
+            };
+            (plot_w, scope_h)
         };
-        (plot_w, scope_h)
-    };
 
     let render_now = move || {
         let ver = frame_version.get_untracked();
@@ -184,9 +183,7 @@ pub fn ScopeCanvas(
         let rect = canvas.get_bounding_client_rect();
         let css_w = rect.width().max(240.0);
         let css_h = rect.height().max(110.0);
-        let dpr = web_sys::window()
-            .map(|w| w.device_pixel_ratio().clamp(1.0, 2.5))
-            .unwrap_or(1.0);
+        let dpr = hotwire_core::web::capped_device_pixel_ratio();
 
         let target_w = (css_w * dpr).round() as u32;
         let target_h = (css_h * dpr).round() as u32;
@@ -299,23 +296,8 @@ pub fn ScopeCanvas(
                             let alpha = frac.powf(1.6) * 0.48;
                             if alpha > 0.02 {
                                 draw_scope_trace(
-                                    &ctx,
-                                    old_frame,
-                                    None,
-                                    &cfgs,
-                                    m_mode,
-                                    d_mode,
-                                    sc,
-                                    PAD_L,
-                                    PAD_T,
-                                    plot_w,
-                                    scope_h,
-                                    start_norm,
-                                    end_norm,
-                                    span,
-                                    alpha,
-                                    1.2,
-                                    false,
+                                    &ctx, old_frame, None, &cfgs, m_mode, d_mode, sc, PAD_L, PAD_T,
+                                    plot_w, scope_h, start_norm, end_norm, span, alpha, 1.2, false,
                                 );
                             }
                         }
@@ -429,8 +411,7 @@ pub fn ScopeCanvas(
             // --- Trigger Markers & Time Axis (Y-T mode) ---
             if d_mode == DisplayMode::Yt {
                 // Vertical trigger time marker
-                let trig_norm =
-                    (frame.trigger_index as f64) / (n.saturating_sub(1).max(1) as f64);
+                let trig_norm = (frame.trigger_index as f64) / (n.saturating_sub(1).max(1) as f64);
                 if trig_norm >= start_norm && trig_norm <= end_norm {
                     let tx = PAD_L + ((trig_norm - start_norm) / span) * plot_w;
                     ctx.save();
@@ -454,7 +435,8 @@ pub fn ScopeCanvas(
                 }
 
                 // Trigger level horizontal dashed line + draggable right-margin handle (T◄)
-                let ty_raw = trig_mv_to_y(trig_mv, cur_means[trig_ch], cfgs[trig_ch], PAD_T, scope_h);
+                let ty_raw =
+                    trig_mv_to_y(trig_mv, cur_means[trig_ch], cfgs[trig_ch], PAD_T, scope_h);
                 let ty_clamped = ty_raw.clamp(PAD_T + 2.0, PAD_T + scope_h - 2.0);
                 let trig_offscreen = ty_raw < PAD_T || ty_raw > PAD_T + scope_h;
 
@@ -498,7 +480,11 @@ pub fn ScopeCanvas(
                     let frac = (d as f64) / 5.0;
                     let x = PAD_L + frac * plot_w;
                     let t_us = start_us + frac * visible_us;
-                    let _ = ctx.fill_text(&format_time_us(t_us as f32), x - 18.0, PAD_T + scope_h + 15.0);
+                    let _ = ctx.fill_text(
+                        &format_time_us(t_us as f32),
+                        x - 18.0,
+                        PAD_T + scope_h + 15.0,
+                    );
                 }
 
                 // Top-left instrument status HUD
@@ -525,7 +511,9 @@ pub fn ScopeCanvas(
                     let ref_ch = if !frame.channels_mv[sel_ch].is_empty() {
                         sel_ch
                     } else {
-                        (0..4).find(|&c| !frame.channels_mv[c].is_empty()).unwrap_or(0)
+                        (0..4)
+                            .find(|&c| !frame.channels_mv[c].is_empty())
+                            .unwrap_or(0)
                     };
                     let samples = &frame.channels_mv[ref_ch];
                     if !samples.is_empty() {
@@ -533,14 +521,17 @@ pub fn ScopeCanvas(
                         for (c_norm, cx, c_col) in [(ca, ax, "#38bdf8"), (cb, bx, "#f472b6")] {
                             let idx = ((start_norm + c_norm * span).clamp(0.0, 1.0) * max_i as f64)
                                 .round() as usize;
-                            let divs = sample_mv_to_divs(samples[idx], cur_means[ref_ch], cfgs[ref_ch]) as f64;
+                            let divs =
+                                sample_mv_to_divs(samples[idx], cur_means[ref_ch], cfgs[ref_ch])
+                                    as f64;
                             let cy = divs_to_y(divs, PAD_T, scope_h);
                             if cy >= PAD_T && cy <= PAD_T + scope_h {
                                 ctx.save();
                                 ctx.set_stroke_style_str(c_col);
                                 ctx.set_global_alpha(0.30);
                                 ctx.set_line_width(1.0);
-                                let _ = ctx.set_line_dash(&js_sys::Array::of2(&2.into(), &4.into()));
+                                let _ =
+                                    ctx.set_line_dash(&js_sys::Array::of2(&2.into(), &4.into()));
                                 ctx.begin_path();
                                 ctx.move_to(PAD_L, cy);
                                 ctx.line_to(PAD_L + plot_w, cy);
@@ -563,7 +554,9 @@ pub fn ScopeCanvas(
                     let chosen = if !frame.channels_mv[fft_ch].is_empty() {
                         fft_ch
                     } else {
-                        (0..4).find(|&c| !frame.channels_mv[c].is_empty()).unwrap_or(0)
+                        (0..4)
+                            .find(|&c| !frame.channels_mv[c].is_empty())
+                            .unwrap_or(0)
                     };
                     scratch.update_value(|sc| {
                         draw_fft_pane(
@@ -608,9 +601,16 @@ pub fn ScopeCanvas(
                 format_voltage_mv(disp_trig_mv),
                 if frame.triggered { "TRIG'D" } else { "AUTO" }
             );
-            ctx.set_fill_style_str(if frame.triggered { "#4ade80" } else { "#fbbf24" });
+            ctx.set_fill_style_str(if frame.triggered {
+                "#4ade80"
+            } else {
+                "#fbbf24"
+            });
             ctx.set_font("700 10.5px ui-monospace, SFMono-Regular, Menlo, monospace");
-            let tw = ctx.measure_text(&trig_info).map(|m| m.width()).unwrap_or(130.0);
+            let tw = ctx
+                .measure_text(&trig_info)
+                .map(|m| m.width())
+                .unwrap_or(130.0);
             let _ = ctx.fill_text(&trig_info, PAD_L + plot_w - tw, PAD_T - 7.0);
 
             if frame.adc_saturated {
@@ -649,8 +649,12 @@ pub fn ScopeCanvas(
                         let mut hi = f32::NEG_INFINITY;
                         let mut lo = f32::INFINITY;
                         for &v in s {
-                            if v > hi { hi = v; }
-                            if v < lo { lo = v; }
+                            if v > hi {
+                                hi = v;
+                            }
+                            if v < lo {
+                                lo = v;
+                            }
                         }
                         let d_hi = sample_mv_to_divs(hi, cur_means[ch], cfgs[ch]);
                         let d_lo = sample_mv_to_divs(lo, cur_means[ch], cfgs[ch]);
@@ -763,12 +767,23 @@ pub fn ScopeCanvas(
         if d_mode == DisplayMode::Xy {
             return;
         }
-        let (plot_w, _) = calc_plot_geom(rect.width().max(240.0), rect.height().max(110.0), fft_on, d_mode);
+        let (plot_w, _) = calc_plot_geom(
+            rect.width().max(240.0),
+            rect.height().max(110.0),
+            fft_on,
+            d_mode,
+        );
         let anchor_norm = ((x - PAD_L) / plot_w).clamp(0.0, 1.0);
         let factor = if ev.delta_y() < 0.0 { 1.25 } else { 0.8 };
         let old_z = zoom.get_untracked().max(1.0);
-        let (new_z, new_pan) =
-            apply_anchored_zoom(old_z, pan_norm.get_untracked(), factor, anchor_norm, 1.0, 32.0);
+        let (new_z, new_pan) = apply_anchored_zoom(
+            old_z,
+            pan_norm.get_untracked(),
+            factor,
+            anchor_norm,
+            1.0,
+            32.0,
+        );
         if (new_z - old_z).abs() > 1e-4 {
             zoom.set(new_z);
             pan_norm.set(new_pan);
@@ -784,7 +799,12 @@ pub fn ScopeCanvas(
         let y = ev.client_y() as f64 - rect.top();
         let fft_on = show_fft.get_untracked();
         let d_mode = display_mode.get_untracked();
-        let (plot_w, scope_h) = calc_plot_geom(rect.width().max(240.0), rect.height().max(110.0), fft_on, d_mode);
+        let (plot_w, scope_h) = calc_plot_geom(
+            rect.width().max(240.0),
+            rect.height().max(110.0),
+            fft_on,
+            d_mode,
+        );
 
         let mut active_ptrs = 0usize;
         gesture_tracker.update_value(|gt| {
@@ -855,7 +875,8 @@ pub fn ScopeCanvas(
                 if (y - ty).abs() <= 22.0 {
                     drag_target.set_value(DragTarget::TriggerLevel);
                     let _ = canvas.set_pointer_capture(ev.pointer_id());
-                    let disp_mv = (trig_level_mv.get_untracked() as f32) * cfgs[trig_ch].probe_mult();
+                    let disp_mv =
+                        (trig_level_mv.get_untracked() as f32) * cfgs[trig_ch].probe_mult();
                     drag_hud.set(Some(format!(
                         "Trig CH{}: {}",
                         trig_ch + 1,
@@ -901,7 +922,12 @@ pub fn ScopeCanvas(
         let y = ev.client_y() as f64 - rect.top();
         let fft_on = show_fft.get_untracked();
         let d_mode = display_mode.get_untracked();
-        let (plot_w, scope_h) = calc_plot_geom(rect.width().max(240.0), rect.height().max(110.0), fft_on, d_mode);
+        let (plot_w, scope_h) = calc_plot_geom(
+            rect.width().max(240.0),
+            rect.height().max(110.0),
+            fft_on,
+            d_mode,
+        );
         let norm_x = ((x - PAD_L) / plot_w).clamp(0.0, 1.0);
 
         let mut gesture_delta = None;
@@ -1496,7 +1522,11 @@ fn draw_channel_marker(
     if clip_dir != 0 {
         ctx.set_fill_style_str(color);
         let arrow = if clip_dir > 0 { "▲" } else { "▼" };
-        let ay = if clip_dir > 0 { y - half_h - 3.0 } else { y + half_h + 9.0 };
+        let ay = if clip_dir > 0 {
+            y - half_h - 3.0
+        } else {
+            y + half_h + 9.0
+        };
         let _ = ctx.fill_text(arrow, left_x + 3.5, ay);
     }
     ctx.restore();

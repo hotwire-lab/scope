@@ -84,14 +84,6 @@ pub fn resolve_depth_preset(depth_code: u8) -> ScopeDepthPreset {
         .unwrap_or(SCOPE_DEPTH_PRESETS[1])
 }
 
-pub fn decode_board_capabilities_frame(
-    payload: &[u8],
-) -> Option<(BoardIdentity, BoardCapabilitiesFrame)> {
-    let identity = BoardIdentity::decode_capabilities(payload)?;
-    let caps = BoardCapabilitiesFrame::from_identity(&identity);
-    Some((identity, caps))
-}
-
 pub fn decode_scope_frame(payload: &[u8], timestamp_ms: f64) -> Option<ScopeFrame> {
     if payload.len() < 16 {
         return None;

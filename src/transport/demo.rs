@@ -37,10 +37,10 @@ impl Default for DemoSimulator {
 impl DemoSimulator {
     pub fn new() -> Self {
         Self {
-            rate_code: 3, // 83.3 kSPS
+            rate_code: 3,       // 83.3 kSPS
             channel_mask: 0x03, // CH1 + CH2
-            atten_code: 3, // 12 dB (0-3.1V)
-            samples_code: 1, // 1024
+            atten_code: 3,      // 12 dB (0-3.1V)
+            samples_code: 1,    // 1024
             trig_mode: SCOPE_TRIG_AUTO,
             trig_edge: SCOPE_EDGE_RISING,
             trig_ch: 0,
@@ -72,7 +72,7 @@ impl DemoSimulator {
                 if compute_xor_checksum(&frame[..7]) == frame[7] {
                     match frame[2] {
                         CMD_GET_CAPS | CMD_PING_STATUS => {
-                            let caps = r#"{"board":"XIAO-ESP32-S3","firmware":"1.1.0-scope-demo","scope":true,"max_channels":4,"max_rate_hz":1000000,"adc_bits":12}"#;
+                            let caps = r#"{"board":"XIAO-ESP32-S3","firmware":"1.1.1-scope-demo","scope":true,"max_channels":4,"max_rate_hz":1000000,"adc_bits":12}"#;
                             out.extend_from_slice(&encode_response_frame(
                                 TYPE_BOARD_CAPABILITIES,
                                 caps.as_bytes(),
@@ -170,12 +170,15 @@ impl DemoSimulator {
                         // CH1: Clean Sine Wave
                         let mid = vref as f32 * 0.5;
                         let amp = vref as f32 * 0.36;
-                        mid + amp * (2.0 * std::f64::consts::PI * base_freq * dt + phase_offset).sin() as f32
+                        mid + amp
+                            * (2.0 * std::f64::consts::PI * base_freq * dt + phase_offset).sin()
+                                as f32
                             + noise
                     }
                     1 => {
                         // CH2: PWM Square Wave (35% duty) with slight overshoot
-                        let cyc = (base_freq * dt + if locked { 0.0 } else { self.phase * 0.15 }).rem_euclid(1.0);
+                        let cyc = (base_freq * dt + if locked { 0.0 } else { self.phase * 0.15 })
+                            .rem_euclid(1.0);
                         let low = vref as f32 * 0.12;
                         let high = vref as f32 * 0.84;
                         let edge_ring = if cyc < 0.04 {
@@ -187,14 +190,25 @@ impl DemoSimulator {
                     }
                     2 => {
                         // CH3: Triangle wave (2.5x frequency)
-                        let cyc = (base_freq * 2.5 * dt + if locked { 0.2 } else { self.phase * 0.2 }).rem_euclid(1.0) as f32;
-                        let tri = if cyc < 0.5 { cyc * 2.0 } else { (1.0 - cyc) * 2.0 };
+                        let cyc = (base_freq * 2.5 * dt
+                            + if locked { 0.2 } else { self.phase * 0.2 })
+                        .rem_euclid(1.0) as f32;
+                        let tri = if cyc < 0.5 {
+                            cyc * 2.0
+                        } else {
+                            (1.0 - cyc) * 2.0
+                        };
                         vref as f32 * (0.15 + 0.65 * tri) + noise
                     }
                     _ => {
                         // CH4: AM Modulated burst
-                        let env = 0.5 + 0.5 * (2.0 * std::f64::consts::PI * (base_freq * 0.25) * dt).sin() as f32;
-                        let carrier = (2.0 * std::f64::consts::PI * (base_freq * 4.0) * dt + phase_offset).sin() as f32;
+                        let env = 0.5
+                            + 0.5
+                                * (2.0 * std::f64::consts::PI * (base_freq * 0.25) * dt).sin()
+                                    as f32;
+                        let carrier = (2.0 * std::f64::consts::PI * (base_freq * 4.0) * dt
+                            + phase_offset)
+                            .sin() as f32;
                         vref as f32 * 0.5 + vref as f32 * 0.35 * env * carrier + noise
                     }
                 };

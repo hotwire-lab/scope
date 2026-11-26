@@ -35,12 +35,7 @@ pub fn ScopeControlBar(
             .map(|c| usize::from(c.max_channels.clamp(1, 4)))
             .unwrap_or(4)
     };
-    let max_rate_hz = move || {
-        board_caps
-            .get()
-            .map(|c| c.max_rate_hz)
-            .unwrap_or(u32::MAX)
-    };
+    let max_rate_hz = move || board_caps.get().map(|c| c.max_rate_hz).unwrap_or(u32::MAX);
 
     view! {
         <section class=move || {

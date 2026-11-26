@@ -16,7 +16,7 @@ Turn a **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into a real-time **4-
 
 1. Plug your **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into USB.
 2. Open **[https://hotwire-lab.github.io/scope/](https://hotwire-lab.github.io/scope/)** in **Chrome**, **Edge**, or **Opera** (Desktop or Android).
-3. Click **⚡ Flasher** (top right), select your board (`XIAO ESP32-S3` or `XIAO ESP32-C6`), and click **Flash Firmware** to program the bundled firmware (`v1.1.0+`) directly from your browser via **`esptool-js`**.
+3. Click **⚡ Flasher** (top right), select your board (`XIAO ESP32-S3` or `XIAO ESP32-C6`), and click **Flash Firmware** to program the bundled firmware (`v1.1.1+`) directly from your browser via **`esptool-js`**.
    * If a board running another HotWire firmware (e.g., Logic Analyzer or SDR) or an outdated version is connected, the app automatically disconnects and shows a one-click **Flash Firmware** prompt.
 4. Connect a jumper wire from **`D6`** (built-in test generator) to **`D0`**, set **Test Gen (`D6`)** to `1 kHz` / `5 kHz` / `10 kHz` / `50 kHz`, and click **AUTO**!
 
@@ -30,7 +30,7 @@ Turn a **Seeed Studio XIAO ESP32-S3** or **XIAO ESP32-C6** into a real-time **4-
 ## Benchtop Oscilloscope Features
 
 - **Unified HotWire Shell (`hotwire-core`):**
-  - Top toolbar with instant **Logic / Scope / SDR / Serial** tool switcher, automatic `0x83` target software & version verification (`v1.1.0+`), swipeable mobile **BottomSheet** Web Flasher, and Web Serial (Desktop) / WebUSB (Android) auto-reconnect.
+  - Top toolbar with instant **Logic / Scope / SDR / Serial / Gen** tool switcher, automatic `0x83` target software & version verification (`v1.1.1+`), swipeable mobile **BottomSheet** Web Flasher, and Web Serial (Desktop) / WebUSB (Android) auto-reconnect.
 - **Authentic 10×8 Graticule & Digital Phosphor:**
   - 10×8 division grid with 5-subdivision center crosshair ticks, two-pass phosphor glow, smooth monotone cubic Hermite spline interpolation when zoomed in (`>= 4 px/sample`) with sample dots (`>= 10 px/sample`), cursor-anchored mouse wheel zoom, and two-finger touch pinch-to-zoom / pan (`PinchPanTracker`).
 - **Independent Per-Channel Vertical Controls (`ChannelStrip`):**

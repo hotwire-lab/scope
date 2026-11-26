@@ -32,6 +32,7 @@ pub fn TopToolbar(
             on_start_demo=on_start_demo
             flasher_open=drawer_open
             on_toggle_flasher=on_toggle_drawer
+            app_version=env!("CARGO_PKG_VERSION")
         >
             {move || {
                 is_active().then(|| {

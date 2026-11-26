@@ -6,16 +6,7 @@ use leptos::prelude::*;
 use crate::transport::serial::SerialTransport;
 
 fn scope_firmware_profiles() -> Vec<FirmwareProfile> {
-    vec![
-        FirmwareProfile::xiao_esp32s3(
-            "HotWire_Scope_XIAO_ESP32S3.ino",
-            "4-Ch ADC1 (D0–D3 / GPIO1–4), Dual-Core GDMA, 83.3 kSPS spec + up to 1 MSPS Turbo OC, Test Gen on D6",
-        ),
-        FirmwareProfile::xiao_esp32c6(
-            "HotWire_Scope_XIAO_ESP32C6.ino",
-            "3-Ch ADC1 (D0–D2 / GPIO0–2), GDMA Continuous up to 83.3 kSPS, eFuse Curve-Fitting Calibration, Test Gen on D6",
-        ),
-    ]
+    FirmwareProfile::standard_profiles(ToolId::Oscilloscope)
 }
 
 #[component]

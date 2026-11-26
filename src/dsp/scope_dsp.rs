@@ -98,7 +98,10 @@ pub fn measure_channel(samples_mv: &[f32], sample_rate_hz: u32) -> ChannelMeasur
                 let freq = sr / avg_period_samples;
                 let period = 1_000_000.0 / freq;
                 let duty = if high_cnt > 0 {
-                    Some(((high_sum / high_cnt as f32) / avg_period_samples * 100.0).clamp(0.0, 100.0))
+                    Some(
+                        ((high_sum / high_cnt as f32) / avg_period_samples * 100.0)
+                            .clamp(0.0, 100.0),
+                    )
                 } else {
                     None
                 };
@@ -240,36 +243,9 @@ fn fft_in_place(re: &mut [f32], im: &mut [f32]) {
     }
 }
 
-pub fn format_freq(hz: f32) -> String {
-    if hz >= 1_000_000.0 {
-        format!("{:.3} MHz", hz / 1_000_000.0)
-    } else if hz >= 1_000.0 {
-        format!("{:.2} kHz", hz / 1_000.0)
-    } else {
-        format!("{:.1} Hz", hz)
-    }
-}
-
-pub fn format_time_us(us: f32) -> String {
-    let abs = us.abs();
-    if abs >= 1_000_000.0 {
-        format!("{:.3} s", us / 1_000_000.0)
-    } else if abs >= 1_000.0 {
-        format!("{:.2} ms", us / 1_000.0)
-    } else if abs >= 1.0 {
-        format!("{:.1} µs", us)
-    } else {
-        format!("{:.0} ns", us * 1_000.0)
-    }
-}
-
-pub fn format_voltage_mv(mv: f32) -> String {
-    if mv.abs() >= 1000.0 {
-        format!("{:.3} V", mv / 1000.0)
-    } else {
-        format!("{:.1} mV", mv)
-    }
-}
+pub use hotwire_core::format::{
+    format_frequency_precise as format_freq, format_time_us, format_voltage_mv,
+};
 
 /// Compute mean value in mV (used for AC coupling DC-blocking).
 pub fn channel_mean_mv(samples_mv: &[f32]) -> f32 {

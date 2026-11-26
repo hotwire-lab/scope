@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use hotwire_core::protocol::{BoardIdentity, FirmwareMismatch, ToolId};
-use hotwire_core::transport::HandshakeGuard;
+use hotwire_core::protocol::{FrameRule, ToolId};
 use hotwire_core::ui::{FirmwareMismatchModal, HotWireTheme};
+use hotwire_core::web::perf_now;
+use hotwire_core::{use_hotwire_session, SessionConfig};
 use leptos::prelude::*;
 
 use crate::components::bottom_drawer::BottomDrawer;
@@ -13,20 +14,13 @@ use crate::components::scope_control_bar::ScopeControlBar;
 use crate::components::top_toolbar::TopToolbar;
 use crate::dsp::scope_dsp::{compute_autoset, compute_stack_configs};
 use crate::protocol::codec::{build_scope_cfg_cmd, build_scope_run_cmd, build_scope_trig_cmd};
-use crate::protocol::demuxer::ProtocolDemuxer;
+use crate::protocol::demuxer::decode_scope_payload;
 use crate::protocol::types::{
-    BoardCapabilitiesFrame, ChannelViewConfig, DecodedFrame, DisplayMode, MathMode,
-    PersistenceMode, ScopeFrame, SCOPE_EDGE_RISING, SCOPE_RATE_PRESETS, SCOPE_RUN_CONTINUOUS,
-    SCOPE_RUN_SINGLE, SCOPE_RUN_STOP, SCOPE_TRIG_AUTO,
+    BoardCapabilitiesFrame, ChannelViewConfig, DisplayMode, MathMode, PersistenceMode, ScopeFrame,
+    MAX_FRAME_PAYLOAD_LEN, SCOPE_EDGE_RISING, SCOPE_RATE_PRESETS, SCOPE_RUN_CONTINUOUS,
+    SCOPE_RUN_SINGLE, SCOPE_RUN_STOP, SCOPE_TRIG_AUTO, TYPE_SCOPE_FRAME,
 };
-use crate::transport::serial::{create_scope_transport, TransportSnapshot};
-
-fn perf_now() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.performance())
-        .map(|p| p.now())
-        .unwrap_or(0.0)
-}
+use crate::transport::serial::create_scope_transport;
 
 fn supported_channels(caps: Option<&BoardCapabilitiesFrame>) -> usize {
     caps.map(|c| usize::from(c.max_channels.clamp(1, 4)))
@@ -49,12 +43,7 @@ fn max_rate_code(caps: Option<&BoardCapabilitiesFrame>) -> u8 {
 pub fn App() -> impl IntoView {
     let serial_transport = StoredValue::new_local(create_scope_transport());
 
-    let transport = RwSignal::new(serial_transport.with_value(|t| t.snapshot()));
-    let identity = RwSignal::new(None::<BoardIdentity>);
     let board_caps = RwSignal::new(None::<BoardCapabilitiesFrame>);
-    let mismatch = RwSignal::new(None::<FirmwareMismatch>);
-    let flasher_mismatch = RwSignal::new(None::<FirmwareMismatch>);
-    let handshake_guard = StoredValue::new_local(HandshakeGuard::new(ToolId::Oscilloscope));
 
     // Acquisition & trigger settings
     let running = RwSignal::new(false);
@@ -114,7 +103,6 @@ pub fn App() -> impl IntoView {
 
     let last_frame_ts = StoredValue::new(0.0f64);
     let last_meas_ts = StoredValue::new(0.0f64);
-    let demuxer = StoredValue::new_local(ProtocolDemuxer::new());
 
     let send_cfg = move || {
         let cmd = build_scope_cfg_cmd(
@@ -147,129 +135,104 @@ pub fn App() -> impl IntoView {
         serial_transport.with_value(|t| t.send_bytes(&cmd));
     };
 
-    // Initialize transport callbacks
-    serial_transport.with_value(|st| {
-        st.init(
-            move |snap: TransportSnapshot| {
-                let connected = snap.status.is_active();
-                let is_usb = snap.status.is_usb_connected();
-                let dev_name = snap.device_name.clone();
-                transport.set(snap);
-                if !connected {
-                    handshake_guard.update_value(|g| g.cancel());
-                    running.set(false);
-                    identity.set(None);
-                    board_caps.set(None);
-                    fps.set(0.0);
-                    last_frame_ts.set_value(0.0);
-                    demuxer.update_value(|d| d.reset());
-                } else if is_usb {
-                    mismatch.set(None);
-                    flasher_mismatch.set(None);
-                    handshake_guard.update_value(|g| {
-                        g.arm_timeout(dev_name, 5000, move |mm| {
-                            mismatch.set(Some(mm.clone()));
-                            flasher_mismatch.set(Some(mm));
-                            serial_transport.with_value(|t| t.disconnect());
-                        });
-                    });
+    let session = use_hotwire_session(
+        serial_transport.with_value(|t| t.clone()),
+        SessionConfig::new(
+            ToolId::Oscilloscope,
+            vec![FrameRule::new(TYPE_SCOPE_FRAME, 16, MAX_FRAME_PAYLOAD_LEN)],
+        ),
+        move |id, _is_usb| {
+            let caps = BoardCapabilitiesFrame::from_identity(id);
+            drawer_open.set(false);
+
+            // Keep the UI inside the limits reported by the connected board
+            // (C6 has 3 channels and no turbo).
+            let channels = supported_channels(Some(&caps));
+            let valid_mask = if channels >= 4 {
+                0x0f
+            } else {
+                (1u8 << channels) - 1
+            };
+            let next_mask = {
+                let masked = channel_mask.get_untracked() & valid_mask;
+                if masked == 0 {
+                    1
                 } else {
-                    handshake_guard.update_value(|g| g.cancel());
-                    mismatch.set(None);
-                    flasher_mismatch.set(None);
+                    masked
                 }
-            },
-            move |bytes: &[u8]| {
-                let now = perf_now();
-                demuxer.update_value(|d| {
-                    d.feed(bytes, now, |frame| match frame {
-                        DecodedFrame::Capabilities(id, caps) => {
-                            serial_transport.with_value(|t| t.notify_handshake_ok());
-                            let is_usb = transport.get_untracked().status.is_usb_connected();
-                            if is_usb {
-                                let mut verdict = Ok(());
-                                handshake_guard.update_value(|g| {
-                                    verdict = g.verify(&id);
-                                });
-                                if let Err(mm) = verdict {
-                                    mismatch.set(Some(mm.clone()));
-                                    flasher_mismatch.set(Some(mm));
-                                    serial_transport.with_value(|t| t.disconnect());
-                                    return;
-                                }
-                            } else {
-                                handshake_guard.update_value(|g| g.cancel());
-                            }
-                            mismatch.set(None);
-                            flasher_mismatch.set(None);
-                            drawer_open.set(false);
-
-                            // Keep the UI inside the limits reported by the
-                            // connected board (C6 has 3 channels and no turbo).
-                            let channels = supported_channels(Some(&caps));
-                            let valid_mask = if channels >= 4 {
-                                0x0f
-                            } else {
-                                (1u8 << channels) - 1
-                            };
-                            let next_mask = {
-                                let masked = channel_mask.get_untracked() & valid_mask;
-                                if masked == 0 { 1 } else { masked }
-                            };
-                            channel_mask.set(next_mask);
-                            let max_ch = (channels.saturating_sub(1)) as u8;
-                            rate_code.update(|v| *v = (*v).min(max_rate_code(Some(&caps))));
-                            trig_channel.update(|v| *v = (*v).min(max_ch));
-                            fft_channel.update(|v| *v = (*v).min(max_ch));
-                            selected_ch.update(|v| *v = (*v).min(max_ch as usize));
-                            if next_mask & (1 << trig_channel.get_untracked()) == 0 {
-                                let first = (0..channels)
-                                    .find(|ch| next_mask & (1u8 << ch) != 0)
-                                    .unwrap_or(0);
-                                trig_channel.set(first as u8);
-                            }
-                            if next_mask & (1 << fft_channel.get_untracked()) == 0 {
-                                let first = (0..channels)
-                                    .find(|ch| next_mask & (1u8 << ch) != 0)
-                                    .unwrap_or(0);
-                                fft_channel.set(first as u8);
-                            }
-                            board_caps.set(Some(caps));
-                            identity.set(Some(id));
-                            send_cfg();
-                            send_trig();
-                            running.set(true);
-                            send_run(SCOPE_RUN_CONTINUOUS);
-                        }
-                        DecodedFrame::Scope(scope_frame) => {
-                            let prev = last_frame_ts.get_value();
-                            if prev > 0.0 {
-                                let dt = now - prev;
-                                if dt > 1.0 {
-                                    let inst = 1000.0 / dt;
-                                    fps.update(|f| {
-                                        *f = if *f == 0.0 { inst } else { *f * 0.8 + inst * 0.2 }
-                                    });
-                                }
-                            }
-                            last_frame_ts.set_value(now);
-                            let arc_frame = Arc::new(scope_frame);
-                            latest_frame.set(Some(arc_frame.clone()));
-                            frame_version.update(|v| *v = v.wrapping_add(1));
-
-                            // Throttle numeric measurement DOM updates to ~10 Hz (immediate on single-shot / first frame)
-                            let prev_m = last_meas_ts.get_value();
-                            if prev_m == 0.0 || !running.get_untracked() || (now - prev_m) >= 100.0
-                            {
-                                last_meas_ts.set_value(now);
-                                meas_frame.set(Some(arc_frame));
-                            }
+            };
+            channel_mask.set(next_mask);
+            let max_ch = (channels.saturating_sub(1)) as u8;
+            rate_code.update(|v| *v = (*v).min(max_rate_code(Some(&caps))));
+            trig_channel.update(|v| *v = (*v).min(max_ch));
+            fft_channel.update(|v| *v = (*v).min(max_ch));
+            selected_ch.update(|v| *v = (*v).min(max_ch as usize));
+            if next_mask & (1 << trig_channel.get_untracked()) == 0 {
+                let first = (0..channels)
+                    .find(|ch| next_mask & (1u8 << ch) != 0)
+                    .unwrap_or(0);
+                trig_channel.set(first as u8);
+            }
+            if next_mask & (1 << fft_channel.get_untracked()) == 0 {
+                let first = (0..channels)
+                    .find(|ch| next_mask & (1u8 << ch) != 0)
+                    .unwrap_or(0);
+                fft_channel.set(first as u8);
+            }
+            board_caps.set(Some(caps));
+            send_cfg();
+            send_trig();
+            running.set(true);
+            send_run(SCOPE_RUN_CONTINUOUS);
+        },
+        move || {
+            running.set(false);
+            board_caps.set(None);
+            fps.set(0.0);
+            last_frame_ts.set_value(0.0);
+            last_meas_ts.set_value(0.0);
+        },
+        move |frame_type, payload| {
+            if frame_type != TYPE_SCOPE_FRAME {
+                return;
+            }
+            let now = perf_now();
+            let Some(scope_frame) = decode_scope_payload(payload, now) else {
+                return;
+            };
+            let prev = last_frame_ts.get_value();
+            if prev > 0.0 {
+                let dt = now - prev;
+                if dt > 1.0 {
+                    let inst = 1000.0 / dt;
+                    fps.update(|f| {
+                        *f = if *f == 0.0 {
+                            inst
+                        } else {
+                            *f * 0.8 + inst * 0.2
                         }
                     });
-                });
-            },
-        );
-    });
+                }
+            }
+            last_frame_ts.set_value(now);
+            let arc_frame = Arc::new(scope_frame);
+            latest_frame.set(Some(arc_frame.clone()));
+            frame_version.update(|v| *v = v.wrapping_add(1));
+
+            // Throttle numeric measurement DOM updates to ~10 Hz (immediate on
+            // single-shot / first frame).
+            let prev_m = last_meas_ts.get_value();
+            if prev_m == 0.0 || !running.get_untracked() || (now - prev_m) >= 100.0 {
+                last_meas_ts.set_value(now);
+                meas_frame.set(Some(arc_frame));
+            }
+        },
+        |_| {},
+    );
+    let transport = session.transport;
+    let identity = session.identity;
+    let mismatch = session.mismatch;
+    let flasher_mismatch = session.flasher_mismatch;
 
     let on_connect = Callback::new(move |_| {
         serial_transport.with_value(|t| t.connect_usb());
@@ -335,9 +298,7 @@ pub fn App() -> impl IntoView {
             }
         });
         let mask = channel_mask.get_untracked();
-        let first_active = (0..channels)
-            .find(|c| mask & (1u8 << c) != 0)
-            .unwrap_or(0);
+        let first_active = (0..channels).find(|c| mask & (1u8 << c) != 0).unwrap_or(0);
         let mut trig_changed = false;
         if mask & (1 << trig_channel.get_untracked()) == 0 {
             trig_channel.set(first_active as u8);
@@ -393,7 +354,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <HotWireTheme />
-        <div class="app-shell">
+        <div class="app-shell hw-app">
             <TopToolbar
                 transport=transport
                 identity=identity

@@ -194,9 +194,7 @@ pub const MATH_COLOR: &str = "#c084fc";
 
 /// Standard oscilloscope 1-2-5 vertical scale steps in millivolts/division (at 1x probe;
 /// scaled by 10x when probe_x10 is enabled).
-pub const V_PER_DIV_STEPS_MV: [f32; 8] = [
-    20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0,
-];
+pub const V_PER_DIV_STEPS_MV: [f32; 8] = [20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelCoupling {
@@ -403,10 +401,4 @@ pub struct ScopeFrame {
     /// Planar channel data: `channels[ch_idx]` holds millivolt samples (`f32`) when active, or empty.
     pub channels_mv: [Vec<f32>; 4],
     pub timestamp_ms: f64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DecodedFrame {
-    Capabilities(BoardIdentity, BoardCapabilitiesFrame),
-    Scope(ScopeFrame),
 }
